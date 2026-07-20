@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import {
   ShoppingCart, Bell, Calendar, Home, Plus, Check, Trash2,
-  Clock, MapPin, X, ChevronLeft, Users, Link2, Copy, LogOut, Lock, Pencil,
+  Clock, MapPin, X, Users, Link2, Copy, LogOut, Lock, Pencil,
 } from "lucide-react";
 import { supabase } from "./supabase.js";
 
@@ -13,7 +13,6 @@ const COLORS = [
   { bg: "bg-amber-100", text: "text-amber-800" },
   { bg: "bg-sky-100", text: "text-sky-800" },
 ];
-
 const STORE_DOT = ["bg-teal-500", "bg-violet-500", "bg-orange-500", "bg-pink-500", "bg-amber-500", "bg-sky-500"];
 const STORE_TEXT = ["text-teal-700", "text-violet-700", "text-orange-700", "text-pink-700", "text-amber-700", "text-sky-700"];
 
@@ -68,20 +67,30 @@ function Logo({ size = 34 }) {
   );
 }
 
+const storeIndex = (stores, id) => stores.findIndex((s) => s.id === id);
+const storeDot = (stores, id) => {
+  const i = storeIndex(stores, id);
+  return i < 0 ? "bg-stone-400" : STORE_DOT[i % STORE_DOT.length];
+};
+const storeText = (stores, id) => {
+  const i = storeIndex(stores, id);
+  return i < 0 ? "text-stone-500" : STORE_TEXT[i % STORE_TEXT.length];
+};
+
 export default function App() {
   const [household, setHousehold] = useState(() => {
     try { return JSON.parse(localStorage.getItem(HH_KEY) || "null"); } catch { return null; }
   });
   const [me, setMe] = useState(() => localStorage.getItem(ME_KEY) || null);
   const [members, setMembers] = useState([]);
-  const [lists, setLists] = useState([]);
+  const [items, setItems] = useState([]);
   const [stores, setStores] = useState([]);
   const [reminders, setReminders] = useState([]);
   const [events, setEvents] = useState([]);
   const [loading, setLoading] = useState(!!household);
   const [error, setError] = useState("");
   const [tab, setTab] = useState("home");
-  const [openListId, setOpenListId] = useState(null);
+  const [storeFilter, setStoreFilter] = useState("all");
   const [showMembers, setShowMembers] = useState(false);
   const notified = useRef(new Set());
 
@@ -89,18 +98,17 @@ export default function App() {
     if (!household) return;
     const hid = household.id;
     try {
-      const [m, l, li, r, ev, st] = await Promise.all([
+      const [m, li, r, ev, st] = await Promise.all([
         supabase.from("handy_members").select("*").eq("household_id", hid).order("created_at"),
-        supabase.from("handy_lists").select("*").eq("household_id", hid).order("created_at"),
         supabase.from("handy_list_items").select("*").eq("household_id", hid).order("created_at"),
         supabase.from("handy_reminders").select("*").eq("household_id", hid).order("due_at"),
         supabase.from("handy_events").select("*").eq("household_id", hid),
         supabase.from("handy_stores").select("*").eq("household_id", hid).order("created_at"),
       ]);
-      const firstError = [m, l, li, r, ev, st].find((x) => x.error);
+      const firstError = [m, li, r, ev, st].find((x) => x.error);
       if (firstError) throw firstError.error;
       setMembers(m.data);
-      setLists(l.data.map((x) => ({ ...x, items: li.data.filter((i) => i.list_id === x.id) })));
+      setItems(li.data);
       setStores(st.data);
       setReminders(r.data);
       setEvents(ev.data);
@@ -113,11 +121,10 @@ export default function App() {
 
   useEffect(() => { fetchAll(); }, [fetchAll]);
 
-  // Live sync: refetch whenever anyone in the household changes anything.
   useEffect(() => {
     if (!household) return;
     const hid = household.id;
-    const tables = ["handy_members", "handy_lists", "handy_list_items", "handy_reminders", "handy_events", "handy_stores"];
+    const tables = ["handy_members", "handy_list_items", "handy_reminders", "handy_events", "handy_stores"];
     const channel = supabase.channel(`handy-${hid}`);
     tables.forEach((t) => {
       channel.on(
@@ -130,7 +137,6 @@ export default function App() {
     return () => { supabase.removeChannel(channel); };
   }, [household, fetchAll]);
 
-  // In-app notifications for reminders coming due (works while the app is open).
   useEffect(() => {
     const check = () => {
       if (!("Notification" in window) || Notification.permission !== "granted") return;
@@ -167,11 +173,10 @@ export default function App() {
     localStorage.removeItem(ME_KEY);
     setHousehold(null);
     setMe(null);
-    setMembers([]); setLists([]); setStores([]); setReminders([]); setEvents([]);
+    setMembers([]); setItems([]); setStores([]); setReminders([]); setEvents([]);
     setShowMembers(false);
   };
 
-  // ---- mutations (realtime triggers refetch, but we also refetch directly for snappiness) ----
   const run = async (promise) => {
     const { error: e } = await promise;
     if (e) setError("Couldn't save that change. Try again.");
@@ -181,11 +186,18 @@ export default function App() {
     if (!name.trim()) return;
     return supabase.from("handy_members").insert({ household_id: household.id, name: name.trim() }).select().single();
   };
-  const addList = (name, storeId) => name.trim() && run(
-    supabase.from("handy_lists").insert({ household_id: household.id, name: name.trim(), store_id: storeId || null })
+  const addItem = (content, storeId) => content.trim() && run(
+    supabase.from("handy_list_items").insert({
+      household_id: household.id, store_id: storeId || null, content: content.trim(), added_by: me,
+    })
   );
-  const setListStore = (listId, storeId) =>
-    run(supabase.from("handy_lists").update({ store_id: storeId || null }).eq("id", listId));
+  const toggleItem = (item) => run(supabase.from("handy_list_items").update({ done: !item.done }).eq("id", item.id));
+  const deleteItem = (id) => run(supabase.from("handy_list_items").delete().eq("id", id));
+  const clearDone = (storeId) => {
+    let q = supabase.from("handy_list_items").delete().eq("household_id", household.id).eq("done", true);
+    q = storeId ? q.eq("store_id", storeId) : q.is("store_id", null);
+    run(q);
+  };
   const addStore = (name) => name.trim() && run(
     supabase.from("handy_stores").insert({ household_id: household.id, name: name.trim() })
   );
@@ -193,22 +205,12 @@ export default function App() {
     supabase.from("handy_stores").update({ name: name.trim() }).eq("id", id)
   );
   const deleteStore = (id) => {
-    if (!window.confirm("Delete this store? Its lists move to No store.")) return;
+    if (!window.confirm("Delete this store? Its items move to No store.")) return;
+    if (storeFilter === id) setStoreFilter("all");
     run(supabase.from("handy_stores").delete().eq("id", id));
   };
-  const deleteList = (id) => {
-    if (!window.confirm("Delete this list for everyone?")) return;
-    setOpenListId(null);
-    run(supabase.from("handy_lists").delete().eq("id", id));
-  };
-  const addItem = (listId, content) => content.trim() && run(
-    supabase.from("handy_list_items").insert({ household_id: household.id, list_id: listId, content: content.trim(), added_by: me })
-  );
-  const toggleItem = (item) => run(supabase.from("handy_list_items").update({ done: !item.done }).eq("id", item.id));
-  const deleteItem = (id) => run(supabase.from("handy_list_items").delete().eq("id", id));
   const addReminder = (content, dueLocal, sharedWith) => {
     if (!content.trim() || !dueLocal) return;
-    // sharedWith: null = everyone, [] = just me, [ids] = me + those members
     run(supabase.from("handy_reminders").insert({
       household_id: household.id, content: content.trim(),
       due_at: new Date(dueLocal).toISOString(), added_by: me,
@@ -222,19 +224,18 @@ export default function App() {
     run(supabase.from("handy_events").insert({
       household_id: household.id, title: ev.title.trim(), event_date: ev.date,
       event_time: ev.time || null, location: ev.location || null,
-      notes: ev.notes || null, list_id: ev.listId || null, added_by: me,
+      notes: ev.notes || null, store_id: ev.storeId || null, added_by: me,
     }));
   };
   const deleteEvent = (id) => run(supabase.from("handy_events").delete().eq("id", id));
 
-  // ---- derived ----
   const now = new Date();
   const canSee = (r) => r.shared_with == null || r.added_by === me || (r.shared_with || []).includes(me);
   const visibleReminders = reminders.filter(canSee);
   const isOverdue = (r) => !r.done && new Date(r.due_at) < now;
   const dueTodayCount = visibleReminders.filter((r) => !r.done && new Date(r.due_at).toDateString() === now.toDateString()).length;
   const overdueCount = visibleReminders.filter(isOverdue).length;
-  const toBuyCount = lists.reduce((n, l) => n + l.items.filter((i) => !i.done).length, 0);
+  const toBuy = items.filter((i) => !i.done);
   const sortedEvents = [...events].sort((a, b) =>
     (a.event_date + (a.event_time || "")) > (b.event_date + (b.event_time || "")) ? 1 : -1
   );
@@ -265,8 +266,6 @@ export default function App() {
     );
   }
 
-  const openList = lists.find((l) => l.id === openListId);
-
   return (
     <div className="min-h-screen bg-stone-100 flex justify-center">
       <div className="w-full max-w-md bg-white min-h-screen flex flex-col border-x border-stone-200">
@@ -296,29 +295,26 @@ export default function App() {
 
         <div className="flex-1 overflow-y-auto px-5 pb-24">
           {tab === "home" && (
-            <HomeTab members={members} lists={lists} reminders={visibleReminders}
-              toBuyCount={toBuyCount} dueTodayCount={dueTodayCount} overdueCount={overdueCount}
-              todayEventsCount={todayEventsCount} isOverdue={isOverdue} upcoming={upcoming}
+            <HomeTab members={members} stores={stores} toBuy={toBuy}
+              dueTodayCount={dueTodayCount} overdueCount={overdueCount} todayEventsCount={todayEventsCount}
+              visibleReminders={visibleReminders} isOverdue={isOverdue} upcoming={upcoming}
               toggleReminder={toggleReminder} toggleItem={toggleItem}
-              goTo={(t, listId) => { setTab(t); setOpenListId(listId || null); }} />
+              goTo={(t, sf) => { setTab(t); if (sf) setStoreFilter(sf); }} />
           )}
-          {tab === "lists" && !openList && (
-            <ListsTab lists={lists} stores={stores} addList={addList} openL={setOpenListId}
+          {tab === "shopping" && (
+            <ShoppingTab members={members} items={items} stores={stores}
+              filter={storeFilter} setFilter={setStoreFilter}
+              addItem={addItem} toggleItem={toggleItem} deleteItem={deleteItem} clearDone={clearDone}
               addStore={addStore} renameStore={renameStore} deleteStore={deleteStore} />
-          )}
-          {tab === "lists" && openList && (
-            <ListDetail members={members} stores={stores} list={openList} back={() => setOpenListId(null)}
-              addItem={addItem} toggleItem={toggleItem} deleteItem={deleteItem} deleteList={deleteList}
-              setListStore={setListStore} />
           )}
           {tab === "reminders" && (
             <RemindersTab members={members} me={me} reminders={visibleReminders} isOverdue={isOverdue}
               addReminder={addReminder} toggleReminder={toggleReminder} deleteReminder={deleteReminder} />
           )}
           {tab === "events" && (
-            <EventsTab members={members} lists={lists} events={sortedEvents}
+            <EventsTab members={members} stores={stores} events={sortedEvents}
               addEvent={addEvent} deleteEvent={deleteEvent}
-              openLinkedList={(listId) => { setTab("lists"); setOpenListId(listId); }} />
+              openStore={(storeId) => { setTab("shopping"); setStoreFilter(storeId); }} />
           )}
         </div>
 
@@ -326,11 +322,11 @@ export default function App() {
           style={{ paddingBottom: "calc(0.5rem + env(safe-area-inset-bottom))" }}>
           {[
             { id: "home", icon: Home, label: "Home" },
-            { id: "lists", icon: ShoppingCart, label: "Lists" },
+            { id: "shopping", icon: ShoppingCart, label: "Shopping" },
             { id: "reminders", icon: Bell, label: "Reminders" },
             { id: "events", icon: Calendar, label: "Events" },
           ].map((t) => (
-            <button key={t.id} onClick={() => { setTab(t.id); setOpenListId(null); }}
+            <button key={t.id} onClick={() => setTab(t.id)}
               className={`flex flex-col items-center gap-0.5 px-3 py-1 ${tab === t.id ? "text-teal-700" : "text-stone-400"}`}>
               <t.icon size={20} />
               <span className="text-[10px]">{t.label}</span>
@@ -387,7 +383,7 @@ function JoinScreen({ onJoined }) {
           <h1 className="text-xl font-medium text-stone-900">Handy APP</h1>
         </div>
         <p className="text-sm text-stone-500 mt-1 mb-5">
-          Shared shopping lists, reminders, and events for your family.
+          Shared shopping, reminders, and events for your family.
         </p>
         <div className="flex gap-1 bg-stone-100 rounded-xl p-1 mb-4">
           <button onClick={() => setMode("create")}
@@ -516,34 +512,44 @@ function MembersModal({ members, me, household, close, chooseMe, onAdd, onLeave 
 }
 
 /* ---------- Home ---------- */
-function HomeTab({ members, lists, reminders, toBuyCount, dueTodayCount, overdueCount,
-  todayEventsCount, isOverdue, upcoming, toggleReminder, toggleItem, goTo }) {
-  const previewList = lists.find((l) => l.items.some((i) => !i.done)) || lists[0];
-  const homeReminders = [...reminders].filter((r) => !r.done).slice(0, 3);
+function HomeTab({ members, stores, toBuy, dueTodayCount, overdueCount, todayEventsCount,
+  visibleReminders, isOverdue, upcoming, toggleReminder, toggleItem, goTo }) {
+  const homeReminders = visibleReminders.filter((r) => !r.done).slice(0, 3);
+  const preview = toBuy.slice(0, 5);
   return (
     <div className="space-y-5">
       <div className="bg-stone-50 rounded-xl px-4 py-3 flex flex-wrap gap-x-4 gap-y-1 text-xs text-stone-600">
-        <span className="flex items-center gap-1"><ShoppingCart size={13} /> {toBuyCount} to buy</span>
+        <span className="flex items-center gap-1"><ShoppingCart size={13} /> {toBuy.length} to buy</span>
         <span className="flex items-center gap-1"><Bell size={13} /> {dueTodayCount} due today{overdueCount > 0 ? ` · ${overdueCount} overdue` : ""}</span>
         <span className="flex items-center gap-1"><Calendar size={13} /> {todayEventsCount} event{todayEventsCount === 1 ? "" : "s"} today</span>
       </div>
 
-      {previewList && (
-        <section>
-          <div className="flex items-center justify-between mb-2">
-            <h2 className="text-sm font-medium text-stone-500">{previewList.name}</h2>
-            <button onClick={() => goTo("lists", previewList.id)} className="text-xs text-teal-700">Open</button>
-          </div>
-          <div className="border border-stone-200 rounded-xl divide-y divide-stone-100">
-            {previewList.items.slice(0, 4).map((it) => (
-              <ItemRow key={it.id} members={members} item={it} onToggle={() => toggleItem(it)} />
-            ))}
-            {previewList.items.length === 0 && (
-              <p className="p-3 text-sm text-stone-400">List is empty — open it to add items.</p>
-            )}
-          </div>
-        </section>
-      )}
+      <section>
+        <div className="flex items-center justify-between mb-2">
+          <h2 className="text-sm font-medium text-stone-500">To buy</h2>
+          <button onClick={() => goTo("shopping")} className="text-xs text-teal-700">All</button>
+        </div>
+        <div className="border border-stone-200 rounded-xl divide-y divide-stone-100">
+          {preview.map((it) => {
+            const store = stores.find((s) => s.id === it.store_id);
+            return (
+              <div key={it.id} className="flex items-center gap-3 px-3 py-2.5">
+                <button onClick={() => toggleItem(it)} aria-label="Mark done"
+                  className="w-5 h-5 rounded-full border border-stone-300 hover:border-teal-500 shrink-0" />
+                <span className="flex-1 text-sm text-stone-800">{it.content}</span>
+                {store && (
+                  <span className="flex items-center gap-1.5 text-[11px] text-stone-400">
+                    <span className={`w-1.5 h-1.5 rounded-full ${storeDot(stores, it.store_id)}`} />
+                    {store.name}
+                  </span>
+                )}
+                <Avatar members={members} id={it.added_by} size="w-6 h-6 text-[10px]" />
+              </div>
+            );
+          })}
+          {preview.length === 0 && <p className="p-3 text-sm text-stone-400">Nothing to buy. Add items from the Shopping tab.</p>}
+        </div>
+      </section>
 
       <section>
         <div className="flex items-center justify-between mb-2">
@@ -564,10 +570,121 @@ function HomeTab({ members, lists, reminders, toBuyCount, dueTodayCount, overdue
           <button onClick={() => goTo("events")} className="text-xs text-teal-700">All</button>
         </div>
         <div className="border border-stone-200 rounded-xl divide-y divide-stone-100">
-          {upcoming.slice(0, 2).map((ev) => <EventRow key={ev.id} members={members} lists={[]} ev={ev} highlight />)}
+          {upcoming.slice(0, 2).map((ev) => <EventRow key={ev.id} members={members} stores={[]} ev={ev} highlight />)}
           {upcoming.length === 0 && <p className="p-3 text-sm text-stone-400">No upcoming events. Add one from the Events tab.</p>}
         </div>
       </section>
+    </div>
+  );
+}
+
+/* ---------- Shopping ---------- */
+function ShoppingTab({ members, items, stores, filter, setFilter,
+  addItem, toggleItem, deleteItem, clearDone, addStore, renameStore, deleteStore }) {
+  const [text, setText] = useState("");
+  const [storeId, setStoreId] = useState("");
+  const [manage, setManage] = useState(false);
+  const [newStore, setNewStore] = useState("");
+  const submit = () => { addItem(text, storeId); setText(""); };
+  const chip = (active) =>
+    `text-[11px] px-2.5 py-1 rounded-full border whitespace-nowrap ${active ? "border-teal-500 bg-teal-50 text-teal-700" : "border-stone-200 text-stone-500 hover:border-stone-300"}`;
+  const groups = [
+    ...stores.map((s, i) => ({ key: s.id, store: s, i, its: items.filter((it) => it.store_id === s.id) })),
+    { key: "none", store: null, i: -1, its: items.filter((it) => !it.store_id || !stores.some((s) => s.id === it.store_id)) },
+  ].filter((g) => g.its.length > 0 && (filter === "all" || filter === g.key));
+  return (
+    <div className="space-y-4">
+      <div className="flex flex-wrap items-center gap-1.5">
+        <button onClick={() => setFilter("all")} className={chip(filter === "all")}>All</button>
+        {stores.map((s) => (
+          <button key={s.id} onClick={() => setFilter(filter === s.id ? "all" : s.id)} className={chip(filter === s.id)}>
+            {s.name}
+          </button>
+        ))}
+        <button onClick={() => setManage(true)}
+          className="text-[11px] px-2.5 py-1 rounded-full border border-dashed border-stone-300 text-stone-400 hover:text-teal-700 hover:border-teal-500">
+          Edit stores
+        </button>
+      </div>
+      <div className="flex gap-2">
+        <input value={text} onChange={(e) => setText(e.target.value)}
+          onKeyDown={(e) => e.key === "Enter" && submit()}
+          placeholder="Add item, like Milk 2L" maxLength={80}
+          className="flex-1 min-w-0 h-10 px-3 text-sm border border-stone-200 rounded-xl outline-none focus:border-teal-500 bg-white text-stone-900" />
+        <select value={storeId} onChange={(e) => setStoreId(e.target.value)}
+          className="w-28 h-10 px-2 text-xs border border-stone-200 rounded-xl outline-none focus:border-teal-500 bg-white text-stone-600">
+          <option value="">No store</option>
+          {stores.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
+        </select>
+        <button onClick={submit} aria-label="Add item" className="h-10 px-3 bg-teal-600 text-white text-sm rounded-xl hover:bg-teal-700">
+          <Plus size={15} />
+        </button>
+      </div>
+      {items.length === 0 && (
+        <p className="text-sm text-stone-400 text-center py-8">Nothing here yet. Add your first item above.</p>
+      )}
+      {items.length > 0 && groups.length === 0 && (
+        <p className="text-sm text-stone-400 text-center py-8">No items for this store yet.</p>
+      )}
+      {groups.map((g) => {
+        const left = g.its.filter((i) => !i.done).length;
+        const doneCount = g.its.length - left;
+        return (
+          <div key={g.key}>
+            <div className="flex items-center gap-2 mb-2">
+              <span className={`w-2 h-2 rounded-full ${g.store ? STORE_DOT[g.i % STORE_DOT.length] : "bg-stone-400"}`} />
+              <h2 className="flex-1 text-sm font-medium text-stone-500">{g.store ? g.store.name : "No store"}</h2>
+              <span className="text-xs text-stone-400">{left === 0 ? "All done" : `${left} to buy`}</span>
+              {doneCount > 0 && (
+                <button onClick={() => clearDone(g.store ? g.store.id : null)} className="text-[11px] text-stone-400 hover:text-red-600">
+                  Clear done
+                </button>
+              )}
+            </div>
+            <div className="border border-stone-200 rounded-xl divide-y divide-stone-100">
+              {g.its.map((it) => (
+                <ItemRow key={it.id} members={members} item={it}
+                  onToggle={() => toggleItem(it)} onDelete={() => deleteItem(it.id)} />
+              ))}
+            </div>
+          </div>
+        );
+      })}
+      {manage && (
+        <div className="fixed inset-0 bg-black/30 flex items-end sm:items-center justify-center z-50" onClick={() => setManage(false)}>
+          <div className="w-full max-w-md bg-white rounded-t-3xl sm:rounded-3xl p-5" onClick={(e) => e.stopPropagation()}>
+            <div className="flex items-center justify-between mb-4">
+              <h2 className="text-base font-medium text-stone-900">Stores</h2>
+              <button onClick={() => setManage(false)} aria-label="Close" className="text-stone-400"><X size={18} /></button>
+            </div>
+            <div className="space-y-1 mb-4">
+              {stores.map((s, i) => (
+                <div key={s.id} className="flex items-center gap-3 py-2 border-b border-stone-100">
+                  <span className={`w-2 h-2 rounded-full ${STORE_DOT[i % STORE_DOT.length]}`} />
+                  <span className="flex-1 text-sm text-stone-800">{s.name}</span>
+                  <button onClick={() => renameStore(s.id, window.prompt("Rename store", s.name))}
+                    aria-label="Rename store" className="text-stone-300 hover:text-teal-700">
+                    <Pencil size={15} />
+                  </button>
+                  <button onClick={() => deleteStore(s.id)} aria-label="Delete store" className="text-stone-300 hover:text-red-500">
+                    <Trash2 size={15} />
+                  </button>
+                </div>
+              ))}
+              {stores.length === 0 && <p className="text-sm text-stone-400 py-2">No stores yet. Add your first below.</p>}
+            </div>
+            <div className="flex gap-2">
+              <input value={newStore} onChange={(e) => setNewStore(e.target.value)}
+                onKeyDown={(e) => e.key === "Enter" && (addStore(newStore), setNewStore(""))}
+                placeholder="Add store, like Trader Joe's" maxLength={30}
+                className="flex-1 h-10 px-3 text-sm border border-stone-200 rounded-xl outline-none focus:border-teal-500 bg-white text-stone-900" />
+              <button onClick={() => { addStore(newStore); setNewStore(""); }}
+                className="h-10 px-4 bg-teal-600 text-white text-sm rounded-xl hover:bg-teal-700">Add</button>
+            </div>
+            <p className="text-[11px] text-stone-400 mt-3">Deleting a store keeps its items — they move to "No store".</p>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -601,8 +718,8 @@ function ReminderRow({ members, r, overdue, onToggle, onDelete }) {
       <span className={`flex-1 text-sm ${r.done ? "text-stone-400 line-through" : "text-stone-800"}`}>{r.content}</span>
       {r.shared_with != null && (
         (r.shared_with || []).length > 0
-          ? <Users size={13} className="text-stone-400 shrink-0" title="Shared with selected members" />
-          : <Lock size={13} className="text-stone-300 shrink-0" title="Only you can see this" />
+          ? <Users size={13} className="text-stone-400 shrink-0" />
+          : <Lock size={13} className="text-stone-300 shrink-0" />
       )}
       <span className={`text-[11px] px-2 py-0.5 rounded-full whitespace-nowrap ${overdue ? "bg-red-50 text-red-700" : "bg-stone-100 text-stone-500"}`}>
         {overdue ? "Overdue · " : ""}{fmtDue(r.due_at)}
@@ -617,9 +734,9 @@ function ReminderRow({ members, r, overdue, onToggle, onDelete }) {
   );
 }
 
-function EventRow({ members, lists, ev, highlight, onDelete, onOpenList }) {
+function EventRow({ members, stores, ev, highlight, onDelete, onOpenStore }) {
   const past = ev.event_date < todayStr();
-  const linked = lists.find((l) => l.id === ev.list_id);
+  const linked = stores.find((s) => s.id === ev.store_id);
   return (
     <div className={`flex items-start gap-3 px-3 py-3 ${past ? "opacity-50" : ""}`}>
       <div className={`w-11 text-center rounded-lg py-1 shrink-0 ${highlight ? "bg-teal-50" : "bg-stone-50"}`}>
@@ -639,8 +756,8 @@ function EventRow({ members, lists, ev, highlight, onDelete, onOpenList }) {
         </p>
         {ev.notes && <p className="text-xs text-stone-500 mt-1">{ev.notes}</p>}
         {linked && (
-          <button onClick={onOpenList} className="text-[11px] text-teal-700 flex items-center gap-1 mt-1">
-            <Link2 size={11} /> {linked.name} list
+          <button onClick={onOpenStore} className={`text-[11px] flex items-center gap-1 mt-1 ${storeText(stores, ev.store_id)}`}>
+            <Link2 size={11} /> {linked.name} shopping
           </button>
         )}
       </div>
@@ -650,159 +767,6 @@ function EventRow({ members, lists, ev, highlight, onDelete, onOpenList }) {
           <Trash2 size={15} />
         </button>
       )}
-    </div>
-  );
-}
-
-/* ---------- Lists ---------- */
-function ListsTab({ lists, stores, addList, openL, addStore, renameStore, deleteStore }) {
-  const [name, setName] = useState("");
-  const [storeId, setStoreId] = useState("");
-  const [filter, setFilter] = useState("all");
-  const [manage, setManage] = useState(false);
-  const [newStore, setNewStore] = useState("");
-  const submit = () => { addList(name, storeId); setName(""); };
-  const chip = (active) =>
-    `text-[11px] px-2.5 py-1 rounded-full border whitespace-nowrap ${active ? "border-teal-500 bg-teal-50 text-teal-700" : "border-stone-200 text-stone-500 hover:border-stone-300"}`;
-  const groups = [
-    ...stores.map((s, i) => ({ key: s.id, store: s, i, ls: lists.filter((l) => l.store_id === s.id) })),
-    { key: "none", store: null, i: -1, ls: lists.filter((l) => !l.store_id || !stores.some((s) => s.id === l.store_id)) },
-  ].filter((g) => g.ls.length > 0 && (filter === "all" || filter === g.key));
-  return (
-    <div className="space-y-4">
-      <div className="flex flex-wrap items-center gap-1.5">
-        <button onClick={() => setFilter("all")} className={chip(filter === "all")}>All</button>
-        {stores.map((s) => (
-          <button key={s.id} onClick={() => setFilter(filter === s.id ? "all" : s.id)} className={chip(filter === s.id)}>
-            {s.name}
-          </button>
-        ))}
-        <button onClick={() => setManage(true)}
-          className="text-[11px] px-2.5 py-1 rounded-full border border-dashed border-stone-300 text-stone-400 hover:text-teal-700 hover:border-teal-500">
-          Edit stores
-        </button>
-      </div>
-      <div className="flex gap-2">
-        <input value={name} onChange={(e) => setName(e.target.value)}
-          onKeyDown={(e) => e.key === "Enter" && submit()}
-          placeholder="New list name" maxLength={40}
-          className="flex-1 min-w-0 h-10 px-3 text-sm border border-stone-200 rounded-xl outline-none focus:border-teal-500 bg-white text-stone-900" />
-        <select value={storeId} onChange={(e) => setStoreId(e.target.value)}
-          className="w-28 h-10 px-2 text-xs border border-stone-200 rounded-xl outline-none focus:border-teal-500 bg-white text-stone-600">
-          <option value="">No store</option>
-          {stores.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
-        </select>
-        <button onClick={submit} aria-label="Add list" className="h-10 px-3 bg-teal-600 text-white text-sm rounded-xl hover:bg-teal-700">
-          <Plus size={15} />
-        </button>
-      </div>
-      {lists.length === 0 && (
-        <p className="text-sm text-stone-400 text-center py-8">No lists yet. Create your first one above.</p>
-      )}
-      {lists.length > 0 && groups.length === 0 && (
-        <p className="text-sm text-stone-400 text-center py-8">No lists for this store yet.</p>
-      )}
-      {groups.map((g) => (
-        <div key={g.key}>
-          <div className="flex items-center gap-2 mb-2">
-            <span className={`w-2 h-2 rounded-full ${g.store ? STORE_DOT[g.i % STORE_DOT.length] : "bg-stone-400"}`} />
-            <h2 className="flex-1 text-sm font-medium text-stone-500">{g.store ? g.store.name : "No store"}</h2>
-            <span className="text-xs text-stone-400">{g.ls.length} list{g.ls.length === 1 ? "" : "s"}</span>
-          </div>
-          <div className="space-y-2">
-            {g.ls.map((l) => {
-              const left = l.items.filter((i) => !i.done).length;
-              return (
-                <button key={l.id} onClick={() => openL(l.id)}
-                  className="w-full flex items-center gap-3 p-4 border border-stone-200 rounded-xl hover:bg-stone-50 text-left">
-                  <ShoppingCart size={18} className={`shrink-0 ${g.store ? STORE_TEXT[g.i % STORE_TEXT.length] : "text-stone-500"}`} />
-                  <span className="flex-1 text-sm font-medium text-stone-800">{l.name}</span>
-                  <span className="text-xs text-stone-400">
-                    {l.items.length === 0 ? "Empty" : left === 0 ? "All done" : `${left} to buy`}
-                  </span>
-                </button>
-              );
-            })}
-          </div>
-        </div>
-      ))}
-      {manage && (
-        <div className="fixed inset-0 bg-black/30 flex items-end sm:items-center justify-center z-50" onClick={() => setManage(false)}>
-          <div className="w-full max-w-md bg-white rounded-t-3xl sm:rounded-3xl p-5" onClick={(e) => e.stopPropagation()}>
-            <div className="flex items-center justify-between mb-4">
-              <h2 className="text-base font-medium text-stone-900">Stores</h2>
-              <button onClick={() => setManage(false)} aria-label="Close" className="text-stone-400"><X size={18} /></button>
-            </div>
-            <div className="space-y-1 mb-4">
-              {stores.map((s, i) => (
-                <div key={s.id} className="flex items-center gap-3 py-2 border-b border-stone-100">
-                  <span className={`w-2 h-2 rounded-full ${STORE_DOT[i % STORE_DOT.length]}`} />
-                  <span className="flex-1 text-sm text-stone-800">{s.name}</span>
-                  <button onClick={() => renameStore(s.id, window.prompt("Rename store", s.name))}
-                    aria-label="Rename store" className="text-stone-300 hover:text-teal-700">
-                    <Pencil size={15} />
-                  </button>
-                  <button onClick={() => deleteStore(s.id)} aria-label="Delete store" className="text-stone-300 hover:text-red-500">
-                    <Trash2 size={15} />
-                  </button>
-                </div>
-              ))}
-              {stores.length === 0 && <p className="text-sm text-stone-400 py-2">No stores yet. Add your first below.</p>}
-            </div>
-            <div className="flex gap-2">
-              <input value={newStore} onChange={(e) => setNewStore(e.target.value)}
-                onKeyDown={(e) => e.key === "Enter" && (addStore(newStore), setNewStore(""))}
-                placeholder="Add store, like Trader Joe's" maxLength={30}
-                className="flex-1 h-10 px-3 text-sm border border-stone-200 rounded-xl outline-none focus:border-teal-500 bg-white text-stone-900" />
-              <button onClick={() => { addStore(newStore); setNewStore(""); }}
-                className="h-10 px-4 bg-teal-600 text-white text-sm rounded-xl hover:bg-teal-700">Add</button>
-            </div>
-            <p className="text-[11px] text-stone-400 mt-3">Deleting a store keeps its lists — they move to "No store".</p>
-          </div>
-        </div>
-      )}
-    </div>
-  );
-}
-
-function ListDetail({ members, stores, list, back, addItem, toggleItem, deleteItem, deleteList, setListStore }) {
-  const [text, setText] = useState("");
-  const done = list.items.filter((i) => i.done).length;
-  const submit = () => { addItem(list.id, text); setText(""); };
-  return (
-    <div className="space-y-4">
-      <div className="flex items-center gap-2">
-        <button onClick={back} aria-label="Back" className="text-stone-500"><ChevronLeft size={20} /></button>
-        <h2 className="flex-1 text-base font-medium text-stone-900">{list.name}</h2>
-        <span className="text-xs text-teal-700">{done} of {list.items.length} done</span>
-        <button onClick={() => deleteList(list.id)} aria-label="Delete list" className="text-stone-300 hover:text-red-500">
-          <Trash2 size={16} />
-        </button>
-      </div>
-      <div className="flex items-center gap-2">
-        <span className="text-xs text-stone-400">Store:</span>
-        <select value={list.store_id || ""} onChange={(e) => setListStore(list.id, e.target.value)}
-          className="h-8 px-2 text-xs border border-stone-200 rounded-lg outline-none focus:border-teal-500 bg-white text-stone-600">
-          <option value="">No store</option>
-          {stores.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
-        </select>
-      </div>
-      <div className="flex gap-2">
-        <input value={text} onChange={(e) => setText(e.target.value)}
-          onKeyDown={(e) => e.key === "Enter" && submit()}
-          placeholder="Add item, like Milk 2L" maxLength={80}
-          className="flex-1 h-10 px-3 text-sm border border-stone-200 rounded-xl outline-none focus:border-teal-500 bg-white text-stone-900" />
-        <button onClick={submit} aria-label="Add item" className="h-10 px-4 bg-teal-600 text-white text-sm rounded-xl hover:bg-teal-700">
-          <Plus size={15} />
-        </button>
-      </div>
-      <div className="border border-stone-200 rounded-xl divide-y divide-stone-100">
-        {list.items.map((it) => (
-          <ItemRow key={it.id} members={members} item={it}
-            onToggle={() => toggleItem(it)} onDelete={() => deleteItem(it.id)} />
-        ))}
-        {list.items.length === 0 && <p className="p-3 text-sm text-stone-400">List is empty. Add the first item above.</p>}
-      </div>
     </div>
   );
 }
@@ -837,7 +801,7 @@ function RemindersTab({ members, me, reminders, isOverdue, addReminder, toggleRe
     <div className="space-y-4">
       <div className="space-y-2">
         <input value={text} onChange={(e) => setText(e.target.value)}
-          placeholder="Remind everyone to…" maxLength={100}
+          placeholder="Remind me to…" maxLength={100}
           className="w-full h-10 px-3 text-sm border border-stone-200 rounded-xl outline-none focus:border-teal-500 bg-white text-stone-900" />
         <div className="flex gap-2">
           <input type="datetime-local" value={due} onChange={(e) => setDue(e.target.value)}
@@ -893,13 +857,13 @@ function RemindersTab({ members, me, reminders, isOverdue, addReminder, toggleRe
 }
 
 /* ---------- Events ---------- */
-function EventsTab({ members, lists, events, addEvent, deleteEvent, openLinkedList }) {
+function EventsTab({ members, stores, events, addEvent, deleteEvent, openStore }) {
   const [showForm, setShowForm] = useState(false);
-  const [form, setForm] = useState({ title: "", date: "", time: "", location: "", notes: "", listId: "" });
+  const [form, setForm] = useState({ title: "", date: "", time: "", location: "", notes: "", storeId: "" });
   const set = (k, v) => setForm({ ...form, [k]: v });
   const submit = () => {
     addEvent(form);
-    setForm({ title: "", date: "", time: "", location: "", notes: "", listId: "" });
+    setForm({ title: "", date: "", time: "", location: "", notes: "", storeId: "" });
     setShowForm(false);
   };
   const upcoming = events.filter((e) => e.event_date >= todayStr());
@@ -925,11 +889,11 @@ function EventsTab({ members, lists, events, addEvent, deleteEvent, openLinkedLi
             className="w-full h-10 px-3 text-sm border border-stone-200 rounded-xl outline-none focus:border-teal-500 bg-white text-stone-900" />
           <textarea value={form.notes} onChange={(e) => set("notes", e.target.value)} placeholder="Notes (optional)" maxLength={300} rows={2}
             className="w-full px-3 py-2 text-sm border border-stone-200 rounded-xl outline-none focus:border-teal-500 bg-white text-stone-900 resize-none" />
-          {lists.length > 0 && (
-            <select value={form.listId} onChange={(e) => set("listId", e.target.value)}
+          {stores.length > 0 && (
+            <select value={form.storeId} onChange={(e) => set("storeId", e.target.value)}
               className="w-full h-10 px-3 text-sm border border-stone-200 rounded-xl outline-none focus:border-teal-500 bg-white text-stone-600">
-              <option value="">Link a shopping list (optional)</option>
-              {lists.map((l) => <option key={l.id} value={l.id}>{l.name}</option>)}
+              <option value="">Link store shopping (optional)</option>
+              {stores.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
             </select>
           )}
           <div className="flex gap-2 pt-1">
@@ -945,8 +909,8 @@ function EventsTab({ members, lists, events, addEvent, deleteEvent, openLinkedLi
       )}
       <div className="border border-stone-200 rounded-xl divide-y divide-stone-100">
         {upcoming.map((ev) => (
-          <EventRow key={ev.id} members={members} lists={lists} ev={ev} highlight
-            onDelete={() => deleteEvent(ev.id)} onOpenList={() => openLinkedList(ev.list_id)} />
+          <EventRow key={ev.id} members={members} stores={stores} ev={ev} highlight
+            onDelete={() => deleteEvent(ev.id)} onOpenStore={() => openStore(ev.store_id)} />
         ))}
         {upcoming.length === 0 && <p className="p-3 text-sm text-stone-400">No upcoming events. Add one above.</p>}
       </div>
@@ -955,8 +919,8 @@ function EventsTab({ members, lists, events, addEvent, deleteEvent, openLinkedLi
           <h3 className="text-xs font-medium text-stone-400 mb-2">Past</h3>
           <div className="border border-stone-200 rounded-xl divide-y divide-stone-100">
             {past.map((ev) => (
-              <EventRow key={ev.id} members={members} lists={lists} ev={ev}
-                onDelete={() => deleteEvent(ev.id)} onOpenList={() => openLinkedList(ev.list_id)} />
+              <EventRow key={ev.id} members={members} stores={stores} ev={ev}
+                onDelete={() => deleteEvent(ev.id)} onOpenStore={() => openStore(ev.store_id)} />
             ))}
           </div>
         </div>
