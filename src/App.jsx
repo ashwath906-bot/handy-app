@@ -54,6 +54,17 @@ function Avatar({ members, id, size = "w-7 h-7 text-xs" }) {
   );
 }
 
+function Logo({ size = 34 }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 120 120" aria-hidden="true" className="shrink-0">
+      <rect width="120" height="120" rx="27" fill="#0D9488" />
+      <line x1="36" y1="30" x2="36" y2="90" stroke="#fff" strokeWidth="13" strokeLinecap="round" />
+      <line x1="84" y1="30" x2="84" y2="90" stroke="#fff" strokeWidth="13" strokeLinecap="round" />
+      <path d="M36 62 L56 76 L84 42" fill="none" stroke="#fff" strokeWidth="13" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  );
+}
+
 export default function App() {
   const [household, setHousehold] = useState(() => {
     try { return JSON.parse(localStorage.getItem(HH_KEY) || "null"); } catch { return null; }
@@ -214,7 +225,8 @@ export default function App() {
 
   if (loading) {
     return (
-      <div className="min-h-screen bg-stone-100 flex items-center justify-center">
+      <div className="min-h-screen bg-stone-100 flex flex-col items-center justify-center gap-3">
+        <Logo size={48} />
         <p className="text-stone-400 text-sm">Loading Handy APP…</p>
       </div>
     );
@@ -240,11 +252,14 @@ export default function App() {
       <div className="w-full max-w-md bg-white min-h-screen flex flex-col border-x border-stone-200">
 
         <div className="px-5 pt-5 pb-3 flex items-center justify-between" style={{ paddingTop: "calc(1.25rem + env(safe-area-inset-top))" }}>
-          <div>
-            <h1 className="text-lg font-medium text-stone-900">Handy APP</h1>
-            <p className="text-xs text-stone-400">
-              {now.toLocaleDateString(undefined, { weekday: "long", month: "short", day: "numeric" })}
-            </p>
+          <div className="flex items-center gap-2.5">
+            <Logo size={34} />
+            <div>
+              <h1 className="text-lg font-medium text-stone-900 leading-tight">Handy APP</h1>
+              <p className="text-xs text-stone-400">
+                {now.toLocaleDateString(undefined, { weekday: "long", month: "short", day: "numeric" })}
+              </p>
+            </div>
           </div>
           <button onClick={() => setShowMembers(true)} className="flex items-center" aria-label="Family members">
             {members.slice(0, 4).map((m, i) => (
@@ -343,7 +358,10 @@ function JoinScreen({ onJoined }) {
   return (
     <div className="min-h-screen bg-stone-100 flex items-center justify-center p-4">
       <div className="w-full max-w-sm bg-white border border-stone-200 rounded-3xl p-6">
-        <h1 className="text-xl font-medium text-stone-900">Handy APP</h1>
+        <div className="flex items-center gap-3 mb-1">
+          <Logo size={40} />
+          <h1 className="text-xl font-medium text-stone-900">Handy APP</h1>
+        </div>
         <p className="text-sm text-stone-500 mt-1 mb-5">
           Shared shopping lists, reminders, and events for your family.
         </p>
@@ -393,7 +411,10 @@ function PickMember({ members, household, onAdd, onPick, onLeave, error }) {
   return (
     <div className="min-h-screen bg-stone-100 flex items-center justify-center p-4">
       <div className="w-full max-w-sm bg-white border border-stone-200 rounded-3xl p-6">
-        <h1 className="text-xl font-medium text-stone-900">{household.name}</h1>
+        <div className="flex items-center gap-3">
+          <Logo size={40} />
+          <h1 className="text-xl font-medium text-stone-900">{household.name}</h1>
+        </div>
         <p className="text-sm text-stone-500 mt-1 mb-5">
           {members.length === 0 ? "Add your family members to get started." : "Who are you? Your pick is saved on this device."}
         </p>
