@@ -514,66 +514,106 @@ function MembersModal({ members, me, household, close, chooseMe, onAdd, onLeave 
 /* ---------- Home ---------- */
 function HomeTab({ members, stores, toBuy, dueTodayCount, overdueCount, todayEventsCount,
   visibleReminders, isOverdue, upcoming, toggleReminder, toggleItem, goTo }) {
-  const homeReminders = visibleReminders.filter((r) => !r.done).slice(0, 3);
-  const preview = toBuy.slice(0, 5);
+  const homeReminders = visibleReminders.filter((r) => !r.done);
+  const preview = toBuy;
   return (
-    <div className="space-y-5">
-      <div className="bg-stone-50 rounded-xl px-4 py-3 flex flex-wrap gap-x-4 gap-y-1 text-xs text-stone-600">
-        <span className="flex items-center gap-1"><ShoppingCart size={13} /> {toBuy.length} to buy</span>
-        <span className="flex items-center gap-1"><Bell size={13} /> {dueTodayCount} due today{overdueCount > 0 ? ` · ${overdueCount} overdue` : ""}</span>
-        <span className="flex items-center gap-1"><Calendar size={13} /> {todayEventsCount} event{todayEventsCount === 1 ? "" : "s"} today</span>
+    <div className="space-y-3.5">
+      <div className="bg-stone-50 rounded-lg px-3 py-2 flex flex-wrap gap-x-3 gap-y-0.5 text-[11px] text-stone-600">
+        <span className="flex items-center gap-1"><ShoppingCart size={12} /> {toBuy.length} to buy</span>
+        <span className="flex items-center gap-1"><Bell size={12} /> {dueTodayCount} due today{overdueCount > 0 ? ` · ${overdueCount} overdue` : ""}</span>
+        <span className="flex items-center gap-1"><Calendar size={12} /> {todayEventsCount} event{todayEventsCount === 1 ? "" : "s"} today</span>
       </div>
 
       <section>
-        <div className="flex items-center justify-between mb-2">
-          <h2 className="text-sm font-medium text-stone-500">To buy</h2>
-          <button onClick={() => goTo("shopping")} className="text-xs text-teal-700">All</button>
+        <div className="flex items-center justify-between mb-1.5">
+          <h2 className="text-xs font-medium text-stone-500">To buy</h2>
+          <button onClick={() => goTo("shopping")} className="text-[11px] text-teal-700">All</button>
         </div>
-        <div className="border border-stone-200 rounded-xl divide-y divide-stone-100">
+        <div className="border border-stone-200 rounded-lg divide-y divide-stone-100">
           {preview.map((it) => {
             const store = stores.find((s) => s.id === it.store_id);
             return (
-              <div key={it.id} className="flex items-center gap-3 px-3 py-2.5">
+              <div key={it.id} className="flex items-center gap-2.5 px-2.5 py-1.5">
                 <button onClick={() => toggleItem(it)} aria-label="Mark done"
-                  className="w-5 h-5 rounded-full border border-stone-300 hover:border-teal-500 shrink-0" />
-                <span className="flex-1 text-sm text-stone-800">{it.content}</span>
+                  className="w-4 h-4 rounded-full border border-stone-300 hover:border-teal-500 shrink-0" />
+                <span className="flex-1 text-[13px] text-stone-800 truncate">{it.content}</span>
                 {store && (
-                  <span className="flex items-center gap-1.5 text-[11px] text-stone-400">
+                  <span className="flex items-center gap-1 text-[10px] text-stone-400 shrink-0">
                     <span className={`w-1.5 h-1.5 rounded-full ${storeDot(stores, it.store_id)}`} />
                     {store.name}
                   </span>
                 )}
-                <Avatar members={members} id={it.added_by} size="w-6 h-6 text-[10px]" />
+                <Avatar members={members} id={it.added_by} size="w-5 h-5 text-[9px]" />
               </div>
             );
           })}
-          {preview.length === 0 && <p className="p-3 text-sm text-stone-400">Nothing to buy. Add items from the Shopping tab.</p>}
+          {preview.length === 0 && <p className="px-2.5 py-2 text-[13px] text-stone-400">Nothing to buy. Add items from the Shopping tab.</p>}
         </div>
       </section>
 
       <section>
-        <div className="flex items-center justify-between mb-2">
-          <h2 className="text-sm font-medium text-stone-500">Reminders</h2>
-          <button onClick={() => goTo("reminders")} className="text-xs text-teal-700">All</button>
+        <div className="flex items-center justify-between mb-1.5">
+          <h2 className="text-xs font-medium text-stone-500">Reminders</h2>
+          <button onClick={() => goTo("reminders")} className="text-[11px] text-teal-700">All</button>
         </div>
-        <div className="border border-stone-200 rounded-xl divide-y divide-stone-100">
+        <div className="border border-stone-200 rounded-lg divide-y divide-stone-100">
           {homeReminders.map((r) => (
-            <ReminderRow key={r.id} members={members} r={r} overdue={isOverdue(r)} onToggle={() => toggleReminder(r)} />
+            <HomeReminderRow key={r.id} members={members} r={r} overdue={isOverdue(r)} onToggle={() => toggleReminder(r)} />
           ))}
-          {homeReminders.length === 0 && <p className="p-3 text-sm text-stone-400">Nothing due. Add one from the Reminders tab.</p>}
+          {homeReminders.length === 0 && <p className="px-2.5 py-2 text-[13px] text-stone-400">Nothing due. Add one from the Reminders tab.</p>}
         </div>
       </section>
 
       <section>
-        <div className="flex items-center justify-between mb-2">
-          <h2 className="text-sm font-medium text-stone-500">Upcoming events</h2>
-          <button onClick={() => goTo("events")} className="text-xs text-teal-700">All</button>
+        <div className="flex items-center justify-between mb-1.5">
+          <h2 className="text-xs font-medium text-stone-500">Upcoming events</h2>
+          <button onClick={() => goTo("events")} className="text-[11px] text-teal-700">All</button>
         </div>
-        <div className="border border-stone-200 rounded-xl divide-y divide-stone-100">
-          {upcoming.slice(0, 2).map((ev) => <EventRow key={ev.id} members={members} stores={[]} ev={ev} highlight />)}
-          {upcoming.length === 0 && <p className="p-3 text-sm text-stone-400">No upcoming events. Add one from the Events tab.</p>}
+        <div className="border border-stone-200 rounded-lg divide-y divide-stone-100">
+          {upcoming.map((ev) => <HomeEventRow key={ev.id} members={members} stores={stores} ev={ev} />)}
+          {upcoming.length === 0 && <p className="px-2.5 py-2 text-[13px] text-stone-400">No upcoming events. Add one from the Events tab.</p>}
         </div>
       </section>
+    </div>
+  );
+}
+
+function HomeReminderRow({ members, r, overdue, onToggle }) {
+  return (
+    <div className="flex items-center gap-2.5 px-2.5 py-1.5">
+      <button onClick={onToggle} aria-label="Mark done"
+        className="w-4 h-4 rounded-full border border-stone-300 hover:border-teal-500 shrink-0" />
+      <span className="flex-1 text-[13px] text-stone-800 truncate">{r.content}</span>
+      {r.shared_with != null && (
+        (r.shared_with || []).length > 0
+          ? <Users size={11} className="text-stone-400 shrink-0" />
+          : <Lock size={11} className="text-stone-300 shrink-0" />
+      )}
+      <span className={`text-[10px] px-1.5 py-0.5 rounded-full whitespace-nowrap shrink-0 ${overdue ? "bg-red-50 text-red-700" : "bg-stone-100 text-stone-500"}`}>
+        {overdue ? "Overdue · " : ""}{fmtDue(r.due_at)}
+      </span>
+      <Avatar members={members} id={r.added_by} size="w-5 h-5 text-[9px]" />
+    </div>
+  );
+}
+
+function HomeEventRow({ members, stores, ev }) {
+  const d = new Date(ev.event_date + "T00:00:00");
+  return (
+    <div className="flex items-center gap-2.5 px-2.5 py-1.5">
+      <div className="w-9 text-center rounded-md py-0.5 shrink-0 bg-teal-50">
+        <p className="text-[9px] text-teal-700 leading-tight">{d.toLocaleDateString(undefined, { weekday: "short" })}</p>
+        <p className="text-sm font-medium text-teal-800 leading-tight">{d.getDate()}</p>
+      </div>
+      <div className="flex-1 min-w-0">
+        <p className="text-[13px] font-medium text-stone-800 truncate">{ev.title}</p>
+        <p className="text-[10px] text-stone-400 flex items-center gap-1.5 flex-wrap">
+          <span>{fmtDate(ev.event_date)}</span>
+          {ev.event_time && <span className="flex items-center gap-0.5"><Clock size={9} /> {fmtTime(ev.event_time)}</span>}
+          {ev.location && <span className="flex items-center gap-0.5 truncate"><MapPin size={9} /> {ev.location}</span>}
+        </p>
+      </div>
+      <Avatar members={members} id={ev.added_by} size="w-5 h-5 text-[9px]" />
     </div>
   );
 }
