@@ -19,6 +19,32 @@ const STORE_TEXT = ["text-teal-700", "text-violet-700", "text-orange-700", "text
 const HH_KEY = "handy_household";
 const ME_KEY = "handy_me";
 
+/* Storage that survives browser eviction better than localStorage alone.
+   Writes to both localStorage and a 1-year cookie; reads from either. */
+const readCookie = (key) => {
+  const hit = document.cookie.split("; ").find((c) => c.startsWith(key + "="));
+  return hit ? decodeURIComponent(hit.slice(key.length + 1)) : null;
+};
+const store = {
+  get(key) {
+    try {
+      const v = localStorage.getItem(key);
+      if (v != null) return v;
+    } catch { /* localStorage blocked */ }
+    return readCookie(key);
+  },
+  set(key, value) {
+    try { localStorage.setItem(key, value); } catch { /* quota or blocked */ }
+    try {
+      document.cookie = `${key}=${encodeURIComponent(value)}; max-age=31536000; path=/; SameSite=Lax`;
+    } catch { /* cookies blocked */ }
+  },
+  remove(key) {
+    try { localStorage.removeItem(key); } catch { /* ignore */ }
+    try { document.cookie = `${key}=; max-age=0; path=/; SameSite=Lax`; } catch { /* ignore */ }
+  },
+};
+
 const initial = (name) => (name || "?").trim().charAt(0).toUpperCase();
 
 const fmtDate = (iso) => {
@@ -79,9 +105,9 @@ const storeText = (stores, id) => {
 
 export default function App() {
   const [household, setHousehold] = useState(() => {
-    try { return JSON.parse(localStorage.getItem(HH_KEY) || "null"); } catch { return null; }
+    try { return JSON.parse(store.get(HH_KEY) || "null"); } catch { return null; }
   });
-  const [me, setMe] = useState(() => localStorage.getItem(ME_KEY) || null);
+  const [me, setMe] = useState(() => store.get(ME_KEY) || null);
   const [members, setMembers] = useState([]);
   const [items, setItems] = useState([]);
   const [stores, setStores] = useState([]);
@@ -121,6 +147,31 @@ export default function App() {
 
   useEffect(() => { fetchAll(); }, [fetchAll]);
 
+  // Ask the browser not to evict our stored household when storage runs low.
+  useEffect(() => {
+    if (navigator.storage && navigator.storage.persist) {
+      navigator.storage.persisted().then((already) => {
+        if (!already) navigator.storage.persist().catch(() => {});
+      }).catch(() => {});
+    }
+  }, []);
+
+  // Recovery: opening the app with ?h=<household id> rejoins automatically,
+  // so a saved link or the family's invite link always gets you back in.
+  useEffect(() => {
+    if (household) return;
+    const hid = new URLSearchParams(window.location.search).get("h");
+    if (!hid) return;
+    (async () => {
+      const { data } = await supabase.from("handy_households").select("*").eq("id", hid).maybeSingle();
+      if (data) {
+        store.set(HH_KEY, JSON.stringify({ id: data.id, name: data.name }));
+        setHousehold({ id: data.id, name: data.name });
+        setLoading(true);
+      }
+    })();
+  }, [household]);
+
   useEffect(() => {
     if (!household) return;
     const hid = household.id;
@@ -158,19 +209,19 @@ export default function App() {
   }, [reminders, me]);
 
   const saveHousehold = (h) => {
-    localStorage.setItem(HH_KEY, JSON.stringify(h));
+    store.set(HH_KEY, JSON.stringify(h));
     setHousehold(h);
     setLoading(true);
   };
   const chooseMe = (id) => {
-    localStorage.setItem(ME_KEY, id);
+    store.set(ME_KEY, id);
     setMe(id);
     setShowMembers(false);
   };
   const leaveHousehold = () => {
     if (!window.confirm("Leave this household on this device? Shared data stays intact.")) return;
-    localStorage.removeItem(HH_KEY);
-    localStorage.removeItem(ME_KEY);
+    store.remove(HH_KEY);
+    store.remove(ME_KEY);
     setHousehold(null);
     setMe(null);
     setMembers([]); setItems([]); setStores([]); setReminders([]); setEvents([]);
@@ -192,6 +243,7 @@ export default function App() {
     })
   );
   const toggleItem = (item) => run(supabase.from("handy_list_items").update({ done: !item.done }).eq("id", item.id));
+  const editItem = (id, content) => content.trim() && run(supabase.from("handy_list_items").update({ content: content.trim() }).eq("id", id));
   const deleteItem = (id) => run(supabase.from("handy_list_items").delete().eq("id", id));
   const clearDone = (storeId) => {
     let q = supabase.from("handy_list_items").delete().eq("household_id", household.id).eq("done", true);
@@ -218,6 +270,12 @@ export default function App() {
     }));
   };
   const toggleReminder = (r) => run(supabase.from("handy_reminders").update({ done: !r.done }).eq("id", r.id));
+  const editReminder = (id, content, dueLocal) => {
+    if (!content.trim() || !dueLocal) return;
+    run(supabase.from("handy_reminders").update({
+      content: content.trim(), due_at: new Date(dueLocal).toISOString(),
+    }).eq("id", id));
+  };
   const deleteReminder = (id) => run(supabase.from("handy_reminders").delete().eq("id", id));
   const addEvent = (ev) => {
     if (!ev.title.trim() || !ev.date) return;
@@ -228,6 +286,13 @@ export default function App() {
     }));
   };
   const deleteEvent = (id) => run(supabase.from("handy_events").delete().eq("id", id));
+  const editEvent = (id, ev) => {
+    if (!ev.title.trim() || !ev.date) return;
+    run(supabase.from("handy_events").update({
+      title: ev.title.trim(), event_date: ev.date, event_time: ev.time || null,
+      location: ev.location || null, notes: ev.notes || null, store_id: ev.storeId || null,
+    }).eq("id", id));
+  };
 
   const now = new Date();
   const canSee = (r) => r.shared_with == null || r.added_by === me || (r.shared_with || []).includes(me);
@@ -304,16 +369,16 @@ export default function App() {
           {tab === "shopping" && (
             <ShoppingTab members={members} items={items} stores={stores}
               filter={storeFilter} setFilter={setStoreFilter}
-              addItem={addItem} toggleItem={toggleItem} deleteItem={deleteItem} clearDone={clearDone}
+              addItem={addItem} toggleItem={toggleItem} deleteItem={deleteItem} editItem={editItem} clearDone={clearDone}
               addStore={addStore} renameStore={renameStore} deleteStore={deleteStore} />
           )}
           {tab === "reminders" && (
             <RemindersTab members={members} me={me} reminders={visibleReminders} isOverdue={isOverdue}
-              addReminder={addReminder} toggleReminder={toggleReminder} deleteReminder={deleteReminder} />
+              addReminder={addReminder} toggleReminder={toggleReminder} deleteReminder={deleteReminder} editReminder={editReminder} />
           )}
           {tab === "events" && (
             <EventsTab members={members} stores={stores} events={sortedEvents}
-              addEvent={addEvent} deleteEvent={deleteEvent}
+              addEvent={addEvent} deleteEvent={deleteEvent} editEvent={editEvent}
               openStore={(storeId) => { setTab("shopping"); setStoreFilter(storeId); }} />
           )}
         </div>
@@ -465,15 +530,16 @@ function PickMember({ members, household, onAdd, onPick, onLeave, error }) {
 
 function MembersModal({ members, me, household, close, chooseMe, onAdd, onLeave }) {
   const [name, setName] = useState("");
-  const [copied, setCopied] = useState(false);
+  const [copied, setCopied] = useState("");
   const submit = () => { onAdd(name); setName(""); };
-  const copyCode = async () => {
+  const copy = async (text, which) => {
     try {
-      await navigator.clipboard.writeText(household.id);
-      setCopied(true);
-      setTimeout(() => setCopied(false), 1500);
+      await navigator.clipboard.writeText(text);
+      setCopied(which);
+      setTimeout(() => setCopied(""), 1500);
     } catch { /* clipboard unavailable */ }
   };
+  const inviteLink = `${window.location.origin}/?h=${household.id}`;
   return (
     <div className="fixed inset-0 bg-black/30 flex items-end sm:items-center justify-center z-50" onClick={close}>
       <div className="w-full max-w-md bg-white rounded-t-3xl sm:rounded-3xl p-5" onClick={(e) => e.stopPropagation()}>
@@ -483,9 +549,14 @@ function MembersModal({ members, me, household, close, chooseMe, onAdd, onLeave 
           </h2>
           <button onClick={close} aria-label="Close" className="text-stone-400"><X size={18} /></button>
         </div>
-        <button onClick={copyCode} className="flex items-center gap-1.5 text-xs text-teal-700 mb-4">
-          <Copy size={12} /> {copied ? "Copied" : "Copy invite code"}
-        </button>
+        <div className="flex flex-wrap gap-x-4 gap-y-1 mb-4">
+          <button onClick={() => copy(inviteLink, "link")} className="flex items-center gap-1.5 text-xs text-teal-700">
+            <Copy size={12} /> {copied === "link" ? "Copied" : "Copy invite link"}
+          </button>
+          <button onClick={() => copy(household.id, "code")} className="flex items-center gap-1.5 text-xs text-stone-500">
+            <Copy size={12} /> {copied === "code" ? "Copied" : "Copy code only"}
+          </button>
+        </div>
         <div className="space-y-2 mb-4">
           {members.map((m) => (
             <button key={m.id} onClick={() => chooseMe(m.id)}
@@ -620,7 +691,7 @@ function HomeEventRow({ members, stores, ev }) {
 
 /* ---------- Shopping ---------- */
 function ShoppingTab({ members, items, stores, filter, setFilter,
-  addItem, toggleItem, deleteItem, clearDone, addStore, renameStore, deleteStore }) {
+  addItem, toggleItem, deleteItem, editItem, clearDone, addStore, renameStore, deleteStore }) {
   const [text, setText] = useState("");
   const [storeId, setStoreId] = useState("");
   const [manage, setManage] = useState(false);
@@ -684,7 +755,8 @@ function ShoppingTab({ members, items, stores, filter, setFilter,
             <div className="border border-stone-200 rounded-xl divide-y divide-stone-100">
               {g.its.map((it) => (
                 <ItemRow key={it.id} members={members} item={it}
-                  onToggle={() => toggleItem(it)} onDelete={() => deleteItem(it.id)} />
+                  onToggle={() => toggleItem(it)} onDelete={() => deleteItem(it.id)}
+                  onEdit={(content) => editItem(it.id, content)} />
               ))}
             </div>
           </div>
@@ -730,7 +802,22 @@ function ShoppingTab({ members, items, stores, filter, setFilter,
 }
 
 /* ---------- shared rows ---------- */
-function ItemRow({ members, item, onToggle, onDelete }) {
+function ItemRow({ members, item, onToggle, onDelete, onEdit }) {
+  const [editing, setEditing] = useState(false);
+  const [val, setVal] = useState(item.content);
+  const save = () => { if (val.trim()) { onEdit(val); setEditing(false); } };
+  if (editing) {
+    return (
+      <div className="flex items-center gap-2 px-3 py-2">
+        <input autoFocus value={val} onChange={(e) => setVal(e.target.value)}
+          onKeyDown={(e) => { if (e.key === "Enter") save(); if (e.key === "Escape") { setVal(item.content); setEditing(false); } }}
+          maxLength={80}
+          className="flex-1 min-w-0 h-8 px-2 text-sm border border-teal-400 rounded-lg outline-none bg-white text-stone-900" />
+        <button onClick={save} aria-label="Save" className="text-teal-600 hover:text-teal-700"><Check size={17} /></button>
+        <button onClick={() => { setVal(item.content); setEditing(false); }} aria-label="Cancel" className="text-stone-400 hover:text-stone-600"><X size={17} /></button>
+      </div>
+    );
+  }
   return (
     <div className="flex items-center gap-3 px-3 py-2.5">
       <button onClick={onToggle} aria-label={item.done ? "Mark not done" : "Mark done"}
@@ -739,6 +826,11 @@ function ItemRow({ members, item, onToggle, onDelete }) {
       </button>
       <span className={`flex-1 text-sm ${item.done ? "text-stone-400 line-through" : "text-stone-800"}`}>{item.content}</span>
       <Avatar members={members} id={item.added_by} size="w-6 h-6 text-[10px]" />
+      {onEdit && (
+        <button onClick={() => { setVal(item.content); setEditing(true); }} aria-label="Edit item" className="text-stone-300 hover:text-teal-700">
+          <Pencil size={14} />
+        </button>
+      )}
       {onDelete && (
         <button onClick={onDelete} aria-label="Delete item" className="text-stone-300 hover:text-red-500">
           <Trash2 size={15} />
@@ -748,7 +840,30 @@ function ItemRow({ members, item, onToggle, onDelete }) {
   );
 }
 
-function ReminderRow({ members, r, overdue, onToggle, onDelete }) {
+function ReminderRow({ members, r, overdue, onToggle, onDelete, onEdit }) {
+  const [editing, setEditing] = useState(false);
+  const [val, setVal] = useState(r.content);
+  const toLocalInput = (iso) => {
+    const d = new Date(iso);
+    const p = (n) => String(n).padStart(2, "0");
+    return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}T${p(d.getHours())}:${p(d.getMinutes())}`;
+  };
+  const [due, setDue] = useState(toLocalInput(r.due_at));
+  const save = () => { if (val.trim() && due) { onEdit(val, due); setEditing(false); } };
+  if (editing) {
+    return (
+      <div className="px-3 py-2 space-y-2">
+        <input autoFocus value={val} onChange={(e) => setVal(e.target.value)} maxLength={100}
+          className="w-full h-9 px-2 text-sm border border-teal-400 rounded-lg outline-none bg-white text-stone-900" />
+        <div className="flex items-center gap-2">
+          <input type="datetime-local" value={due} onChange={(e) => setDue(e.target.value)}
+            className="flex-1 min-w-0 h-9 px-2 text-sm border border-stone-200 rounded-lg outline-none focus:border-teal-500 bg-white text-stone-600" />
+          <button onClick={save} aria-label="Save" className="text-teal-600 hover:text-teal-700"><Check size={17} /></button>
+          <button onClick={() => { setVal(r.content); setDue(toLocalInput(r.due_at)); setEditing(false); }} aria-label="Cancel" className="text-stone-400 hover:text-stone-600"><X size={17} /></button>
+        </div>
+      </div>
+    );
+  }
   return (
     <div className="flex items-center gap-3 px-3 py-2.5">
       <button onClick={onToggle} aria-label={r.done ? "Mark not done" : "Mark done"}
@@ -765,6 +880,11 @@ function ReminderRow({ members, r, overdue, onToggle, onDelete }) {
         {overdue ? "Overdue · " : ""}{fmtDue(r.due_at)}
       </span>
       <Avatar members={members} id={r.added_by} size="w-6 h-6 text-[10px]" />
+      {onEdit && (
+        <button onClick={() => { setVal(r.content); setDue(toLocalInput(r.due_at)); setEditing(true); }} aria-label="Edit reminder" className="text-stone-300 hover:text-teal-700">
+          <Pencil size={14} />
+        </button>
+      )}
       {onDelete && (
         <button onClick={onDelete} aria-label="Delete reminder" className="text-stone-300 hover:text-red-500">
           <Trash2 size={15} />
@@ -774,7 +894,7 @@ function ReminderRow({ members, r, overdue, onToggle, onDelete }) {
   );
 }
 
-function EventRow({ members, stores, ev, highlight, onDelete, onOpenStore }) {
+function EventRow({ members, stores, ev, highlight, onDelete, onEdit, onOpenStore }) {
   const past = ev.event_date < todayStr();
   const linked = stores.find((s) => s.id === ev.store_id);
   return (
@@ -802,6 +922,11 @@ function EventRow({ members, stores, ev, highlight, onDelete, onOpenStore }) {
         )}
       </div>
       <Avatar members={members} id={ev.added_by} size="w-6 h-6 text-[10px]" />
+      {onEdit && (
+        <button onClick={onEdit} aria-label="Edit event" className="text-stone-300 hover:text-teal-700 mt-1">
+          <Pencil size={14} />
+        </button>
+      )}
       {onDelete && (
         <button onClick={onDelete} aria-label="Delete event" className="text-stone-300 hover:text-red-500 mt-1">
           <Trash2 size={15} />
@@ -812,7 +937,7 @@ function EventRow({ members, stores, ev, highlight, onDelete, onOpenStore }) {
 }
 
 /* ---------- Reminders ---------- */
-function RemindersTab({ members, me, reminders, isOverdue, addReminder, toggleReminder, deleteReminder }) {
+function RemindersTab({ members, me, reminders, isOverdue, addReminder, toggleReminder, deleteReminder, editReminder }) {
   const [text, setText] = useState("");
   const [due, setDue] = useState("");
   const [visAll, setVisAll] = useState(false);
@@ -869,7 +994,8 @@ function RemindersTab({ members, me, reminders, isOverdue, addReminder, toggleRe
       <div className="border border-stone-200 rounded-xl divide-y divide-stone-100">
         {open.map((r) => (
           <ReminderRow key={r.id} members={members} r={r} overdue={isOverdue(r)}
-            onToggle={() => toggleReminder(r)} onDelete={() => deleteReminder(r.id)} />
+            onToggle={() => toggleReminder(r)} onDelete={() => deleteReminder(r.id)}
+            onEdit={(content, due) => editReminder(r.id, content, due)} />
         ))}
         {open.length === 0 && <p className="p-3 text-sm text-stone-400">All caught up. Add a reminder above.</p>}
       </div>
@@ -879,7 +1005,8 @@ function RemindersTab({ members, me, reminders, isOverdue, addReminder, toggleRe
           <div className="border border-stone-200 rounded-xl divide-y divide-stone-100">
             {doneList.map((r) => (
               <ReminderRow key={r.id} members={members} r={r} overdue={false}
-                onToggle={() => toggleReminder(r)} onDelete={() => deleteReminder(r.id)} />
+                onToggle={() => toggleReminder(r)} onDelete={() => deleteReminder(r.id)}
+                onEdit={(content, due) => editReminder(r.id, content, due)} />
             ))}
           </div>
         </div>
@@ -897,60 +1024,75 @@ function RemindersTab({ members, me, reminders, isOverdue, addReminder, toggleRe
 }
 
 /* ---------- Events ---------- */
-function EventsTab({ members, stores, events, addEvent, deleteEvent, openStore }) {
+const emptyEventForm = { title: "", date: "", time: "", location: "", notes: "", storeId: "" };
+function EventsTab({ members, stores, events, addEvent, deleteEvent, editEvent, openStore }) {
   const [showForm, setShowForm] = useState(false);
-  const [form, setForm] = useState({ title: "", date: "", time: "", location: "", notes: "", storeId: "" });
+  const [editingId, setEditingId] = useState(null);
+  const [form, setForm] = useState(emptyEventForm);
   const set = (k, v) => setForm({ ...form, [k]: v });
+  const openAdd = () => { setEditingId(null); setForm(emptyEventForm); setShowForm(true); };
+  const openEdit = (ev) => {
+    setEditingId(ev.id);
+    setForm({
+      title: ev.title, date: ev.event_date, time: ev.event_time || "",
+      location: ev.location || "", notes: ev.notes || "", storeId: ev.store_id || "",
+    });
+    setShowForm(true);
+  };
+  const close = () => { setShowForm(false); setEditingId(null); setForm(emptyEventForm); };
   const submit = () => {
-    addEvent(form);
-    setForm({ title: "", date: "", time: "", location: "", notes: "", storeId: "" });
-    setShowForm(false);
+    if (editingId) editEvent(editingId, form);
+    else addEvent(form);
+    close();
   };
   const upcoming = events.filter((e) => e.event_date >= todayStr());
   const past = events.filter((e) => e.event_date < todayStr());
+  const EventForm = (
+    <div className="border border-stone-200 rounded-xl p-4 space-y-2">
+      <input value={form.title} onChange={(e) => set("title", e.target.value)} placeholder="Event title" maxLength={80}
+        className="w-full h-10 px-3 text-sm border border-stone-200 rounded-xl outline-none focus:border-teal-500 bg-white text-stone-900" />
+      <div className="flex gap-2">
+        <input type="date" value={form.date} onChange={(e) => set("date", e.target.value)}
+          className="flex-1 min-w-0 h-10 px-3 text-sm border border-stone-200 rounded-xl outline-none focus:border-teal-500 bg-white text-stone-600" />
+        <input type="time" value={form.time} onChange={(e) => set("time", e.target.value)}
+          className="flex-1 min-w-0 h-10 px-3 text-sm border border-stone-200 rounded-xl outline-none focus:border-teal-500 bg-white text-stone-600" />
+      </div>
+      <input value={form.location} onChange={(e) => set("location", e.target.value)} placeholder="Location (optional)" maxLength={80}
+        className="w-full h-10 px-3 text-sm border border-stone-200 rounded-xl outline-none focus:border-teal-500 bg-white text-stone-900" />
+      <textarea value={form.notes} onChange={(e) => set("notes", e.target.value)} placeholder="Notes (optional)" maxLength={300} rows={2}
+        className="w-full px-3 py-2 text-sm border border-stone-200 rounded-xl outline-none focus:border-teal-500 bg-white text-stone-900 resize-none" />
+      {stores.length > 0 && (
+        <select value={form.storeId} onChange={(e) => set("storeId", e.target.value)}
+          className="w-full h-10 px-3 text-sm border border-stone-200 rounded-xl outline-none focus:border-teal-500 bg-white text-stone-600">
+          <option value="">Link store shopping (optional)</option>
+          {stores.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
+        </select>
+      )}
+      <div className="flex gap-2 pt-1">
+        <button onClick={submit} disabled={!form.title.trim() || !form.date}
+          className="flex-1 h-10 bg-teal-600 text-white text-sm rounded-xl hover:bg-teal-700 disabled:opacity-40">
+          {editingId ? "Save changes" : "Save event"}
+        </button>
+        <button onClick={close} className="h-10 px-4 border border-stone-200 text-sm text-stone-600 rounded-xl hover:bg-stone-50">
+          Cancel
+        </button>
+      </div>
+    </div>
+  );
   return (
     <div className="space-y-4">
-      {!showForm ? (
-        <button onClick={() => setShowForm(true)}
+      {showForm && !editingId ? EventForm : (
+        <button onClick={openAdd}
           className="w-full h-10 border border-dashed border-stone-300 rounded-xl text-sm text-stone-500 hover:border-teal-500 hover:text-teal-700 flex items-center justify-center gap-1">
           <Plus size={15} /> Add event
         </button>
-      ) : (
-        <div className="border border-stone-200 rounded-xl p-4 space-y-2">
-          <input value={form.title} onChange={(e) => set("title", e.target.value)} placeholder="Event title" maxLength={80}
-            className="w-full h-10 px-3 text-sm border border-stone-200 rounded-xl outline-none focus:border-teal-500 bg-white text-stone-900" />
-          <div className="flex gap-2">
-            <input type="date" value={form.date} onChange={(e) => set("date", e.target.value)}
-              className="flex-1 min-w-0 h-10 px-3 text-sm border border-stone-200 rounded-xl outline-none focus:border-teal-500 bg-white text-stone-600" />
-            <input type="time" value={form.time} onChange={(e) => set("time", e.target.value)}
-              className="flex-1 min-w-0 h-10 px-3 text-sm border border-stone-200 rounded-xl outline-none focus:border-teal-500 bg-white text-stone-600" />
-          </div>
-          <input value={form.location} onChange={(e) => set("location", e.target.value)} placeholder="Location (optional)" maxLength={80}
-            className="w-full h-10 px-3 text-sm border border-stone-200 rounded-xl outline-none focus:border-teal-500 bg-white text-stone-900" />
-          <textarea value={form.notes} onChange={(e) => set("notes", e.target.value)} placeholder="Notes (optional)" maxLength={300} rows={2}
-            className="w-full px-3 py-2 text-sm border border-stone-200 rounded-xl outline-none focus:border-teal-500 bg-white text-stone-900 resize-none" />
-          {stores.length > 0 && (
-            <select value={form.storeId} onChange={(e) => set("storeId", e.target.value)}
-              className="w-full h-10 px-3 text-sm border border-stone-200 rounded-xl outline-none focus:border-teal-500 bg-white text-stone-600">
-              <option value="">Link store shopping (optional)</option>
-              {stores.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
-            </select>
-          )}
-          <div className="flex gap-2 pt-1">
-            <button onClick={submit} disabled={!form.title.trim() || !form.date}
-              className="flex-1 h-10 bg-teal-600 text-white text-sm rounded-xl hover:bg-teal-700 disabled:opacity-40">
-              Save event
-            </button>
-            <button onClick={() => setShowForm(false)} className="h-10 px-4 border border-stone-200 text-sm text-stone-600 rounded-xl hover:bg-stone-50">
-              Cancel
-            </button>
-          </div>
-        </div>
       )}
       <div className="border border-stone-200 rounded-xl divide-y divide-stone-100">
         {upcoming.map((ev) => (
-          <EventRow key={ev.id} members={members} stores={stores} ev={ev} highlight
-            onDelete={() => deleteEvent(ev.id)} onOpenStore={() => openStore(ev.store_id)} />
+          editingId === ev.id ? <div key={ev.id} className="p-2">{EventForm}</div> : (
+            <EventRow key={ev.id} members={members} stores={stores} ev={ev} highlight
+              onDelete={() => deleteEvent(ev.id)} onEdit={() => openEdit(ev)} onOpenStore={() => openStore(ev.store_id)} />
+          )
         ))}
         {upcoming.length === 0 && <p className="p-3 text-sm text-stone-400">No upcoming events. Add one above.</p>}
       </div>
@@ -959,8 +1101,10 @@ function EventsTab({ members, stores, events, addEvent, deleteEvent, openStore }
           <h3 className="text-xs font-medium text-stone-400 mb-2">Past</h3>
           <div className="border border-stone-200 rounded-xl divide-y divide-stone-100">
             {past.map((ev) => (
-              <EventRow key={ev.id} members={members} stores={stores} ev={ev}
-                onDelete={() => deleteEvent(ev.id)} onOpenStore={() => openStore(ev.store_id)} />
+              editingId === ev.id ? <div key={ev.id} className="p-2">{EventForm}</div> : (
+                <EventRow key={ev.id} members={members} stores={stores} ev={ev}
+                  onDelete={() => deleteEvent(ev.id)} onEdit={() => openEdit(ev)} onOpenStore={() => openStore(ev.store_id)} />
+              )
             ))}
           </div>
         </div>
