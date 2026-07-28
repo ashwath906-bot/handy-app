@@ -2,6 +2,8 @@ import { useState, useEffect, useCallback, useRef } from "react";
 import {
   ShoppingCart, Bell, Calendar, Home, Plus, Check, Trash2,
   Clock, MapPin, X, Users, Link2, Copy, LogOut, Lock, Pencil,
+  Mic, Wallet, Fuel, Zap, UtensilsCrossed, Car, Heart, Home as HomeIcon,
+  Gift, Shirt, Plane, MoreHorizontal,
 } from "lucide-react";
 import { supabase } from "./supabase.js";
 
@@ -15,6 +17,63 @@ const COLORS = [
 ];
 const STORE_DOT = ["bg-teal-500", "bg-violet-500", "bg-orange-500", "bg-pink-500", "bg-amber-500", "bg-sky-500"];
 const STORE_TEXT = ["text-teal-700", "text-violet-700", "text-orange-700", "text-pink-700", "text-amber-700", "text-sky-700"];
+
+const DEFAULT_EXPENSE_CATS = [
+  { name: "Groceries", icon: "cart" },
+  { name: "Fuel", icon: "fuel" },
+  { name: "Utilities", icon: "zap" },
+  { name: "Dining out", icon: "food" },
+  { name: "Transport", icon: "car" },
+  { name: "Health", icon: "heart" },
+  { name: "Rent", icon: "home" },
+  { name: "Other", icon: "more" },
+];
+const CAT_ICONS = {
+  cart: ShoppingCart, fuel: Fuel, zap: Zap, food: UtensilsCrossed, car: Car,
+  heart: Heart, home: HomeIcon, gift: Gift, shirt: Shirt, plane: Plane,
+  wallet: Wallet, more: MoreHorizontal,
+};
+const CatIcon = ({ icon, size = 15, className = "" }) => {
+  const Ico = CAT_ICONS[icon] || Wallet;
+  return <Ico size={size} className={className} />;
+};
+
+const speechSupported = typeof window !== "undefined" &&
+  (window.SpeechRecognition || window.webkitSpeechRecognition);
+
+/* Tap-to-talk hook. onResult gets the final transcript string. */
+function useSpeech(onResult) {
+  const [listening, setListening] = useState(false);
+  const recRef = useRef(null);
+  const start = () => {
+    if (!speechSupported) return;
+    if (listening) { try { recRef.current && recRef.current.stop(); } catch { /* ignore */ } return; }
+    const Rec = window.SpeechRecognition || window.webkitSpeechRecognition;
+    const rec = new Rec();
+    rec.lang = navigator.language || "en-US";
+    rec.interimResults = false;
+    rec.maxAlternatives = 1;
+    rec.onresult = (e) => {
+      const text = e.results[0][0].transcript.trim();
+      if (text) onResult(text);
+    };
+    rec.onend = () => setListening(false);
+    rec.onerror = () => setListening(false);
+    recRef.current = rec;
+    setListening(true);
+    try { rec.start(); } catch { setListening(false); }
+  };
+  return { listening, start, supported: !!speechSupported };
+}
+
+function MicButton({ listening, onClick }) {
+  return (
+    <button onClick={onClick} aria-label={listening ? "Stop listening" : "Add by voice"}
+      className={`h-10 px-3 rounded-xl border shrink-0 flex items-center justify-center ${listening ? "bg-teal-600 border-teal-600 text-white animate-pulse" : "bg-teal-50 border-teal-200 text-teal-700 hover:bg-teal-100"}`}>
+      <Mic size={17} />
+    </button>
+  );
+}
 
 const HH_KEY = "handy_household";
 const ME_KEY = "handy_me";
@@ -113,32 +172,49 @@ export default function App() {
   const [stores, setStores] = useState([]);
   const [reminders, setReminders] = useState([]);
   const [events, setEvents] = useState([]);
+  const [expenses, setExpenses] = useState([]);
+  const [expenseCats, setExpenseCats] = useState([]);
   const [loading, setLoading] = useState(!!household);
   const [error, setError] = useState("");
   const [tab, setTab] = useState("home");
   const [storeFilter, setStoreFilter] = useState("all");
   const [showMembers, setShowMembers] = useState(false);
   const notified = useRef(new Set());
+  const seededCats = useRef(false);
 
   const fetchAll = useCallback(async () => {
     if (!household) return;
     const hid = household.id;
     try {
-      const [m, li, r, ev, st] = await Promise.all([
+      const [m, li, r, ev, st, ex, ec] = await Promise.all([
         supabase.from("handy_members").select("*").eq("household_id", hid).order("created_at"),
         supabase.from("handy_list_items").select("*").eq("household_id", hid).order("created_at"),
         supabase.from("handy_reminders").select("*").eq("household_id", hid).order("due_at"),
         supabase.from("handy_events").select("*").eq("household_id", hid),
         supabase.from("handy_stores").select("*").eq("household_id", hid).order("created_at"),
+        supabase.from("handy_expenses").select("*").eq("household_id", hid).order("spent_on", { ascending: false }),
+        supabase.from("handy_expense_categories").select("*").eq("household_id", hid).order("created_at"),
       ]);
-      const firstError = [m, li, r, ev, st].find((x) => x.error);
+      const firstError = [m, li, r, ev, st, ex, ec].find((x) => x.error);
       if (firstError) throw firstError.error;
       setMembers(m.data);
       setItems(li.data);
       setStores(st.data);
       setReminders(r.data);
       setEvents(ev.data);
+      setExpenses(ex.data);
+      setExpenseCats(ec.data);
       setError("");
+      // Seed default expense categories once, for a household that has none yet.
+      if (ec.data.length === 0 && !seededCats.current && m.data.length > 0) {
+        seededCats.current = true;
+        await supabase.from("handy_expense_categories").insert(
+          DEFAULT_EXPENSE_CATS.map((c) => ({ household_id: hid, name: c.name, icon: c.icon }))
+        );
+        const { data: seeded } = await supabase.from("handy_expense_categories")
+          .select("*").eq("household_id", hid).order("created_at");
+        if (seeded) setExpenseCats(seeded);
+      }
     } catch (e) {
       setError("Couldn't load data. Check your connection and Supabase setup.");
     }
@@ -175,7 +251,7 @@ export default function App() {
   useEffect(() => {
     if (!household) return;
     const hid = household.id;
-    const tables = ["handy_members", "handy_list_items", "handy_reminders", "handy_events", "handy_stores"];
+    const tables = ["handy_members", "handy_list_items", "handy_reminders", "handy_events", "handy_stores", "handy_expenses", "handy_expense_categories"];
     const channel = supabase.channel(`handy-${hid}`);
     tables.forEach((t) => {
       channel.on(
@@ -224,7 +300,7 @@ export default function App() {
     store.remove(ME_KEY);
     setHousehold(null);
     setMe(null);
-    setMembers([]); setItems([]); setStores([]); setReminders([]); setEvents([]);
+    setMembers([]); setItems([]); setStores([]); setReminders([]); setEvents([]); setExpenses([]); setExpenseCats([]);
     setShowMembers(false);
   };
 
@@ -292,6 +368,33 @@ export default function App() {
       title: ev.title.trim(), event_date: ev.date, event_time: ev.time || null,
       location: ev.location || null, notes: ev.notes || null, store_id: ev.storeId || null,
     }).eq("id", id));
+  };
+  const addExpense = (ex) => {
+    const amt = parseFloat(ex.amount);
+    if (!ex.categoryName || !ex.date || !(amt > 0)) return;
+    run(supabase.from("handy_expenses").insert({
+      household_id: household.id, category_id: ex.categoryId || null,
+      category_name: ex.categoryName, amount: amt, spent_on: ex.date, added_by: me,
+    }));
+  };
+  const editExpense = (id, ex) => {
+    const amt = parseFloat(ex.amount);
+    if (!ex.categoryName || !ex.date || !(amt > 0)) return;
+    run(supabase.from("handy_expenses").update({
+      category_id: ex.categoryId || null, category_name: ex.categoryName,
+      amount: amt, spent_on: ex.date,
+    }).eq("id", id));
+  };
+  const deleteExpense = (id) => run(supabase.from("handy_expenses").delete().eq("id", id));
+  const addCategory = (name, icon) => name.trim() && run(
+    supabase.from("handy_expense_categories").insert({ household_id: household.id, name: name.trim(), icon: icon || "wallet" })
+  );
+  const renameCategory = (id, name) => name && name.trim() && run(
+    supabase.from("handy_expense_categories").update({ name: name.trim() }).eq("id", id)
+  );
+  const deleteCategory = (id) => {
+    if (!window.confirm("Delete this category? Past expenses keep their category name.")) return;
+    run(supabase.from("handy_expense_categories").delete().eq("id", id));
   };
 
   const now = new Date();
@@ -381,6 +484,11 @@ export default function App() {
               addEvent={addEvent} deleteEvent={deleteEvent} editEvent={editEvent}
               openStore={(storeId) => { setTab("shopping"); setStoreFilter(storeId); }} />
           )}
+          {tab === "expenses" && (
+            <ExpensesTab members={members} expenses={expenses} cats={expenseCats}
+              addExpense={addExpense} editExpense={editExpense} deleteExpense={deleteExpense}
+              addCategory={addCategory} renameCategory={renameCategory} deleteCategory={deleteCategory} />
+          )}
         </div>
 
         <div className="fixed bottom-0 left-1/2 -translate-x-1/2 w-full max-w-md bg-white border-t border-x border-stone-200 flex justify-around py-2"
@@ -390,11 +498,12 @@ export default function App() {
             { id: "shopping", icon: ShoppingCart, label: "Shopping" },
             { id: "reminders", icon: Bell, label: "Reminders" },
             { id: "events", icon: Calendar, label: "Events" },
+            { id: "expenses", icon: Wallet, label: "Expenses" },
           ].map((t) => (
             <button key={t.id} onClick={() => setTab(t.id)}
-              className={`flex flex-col items-center gap-0.5 px-3 py-1 ${tab === t.id ? "text-teal-700" : "text-stone-400"}`}>
-              <t.icon size={20} />
-              <span className="text-[10px]">{t.label}</span>
+              className={`flex flex-col items-center gap-0.5 px-2 py-1 ${tab === t.id ? "text-teal-700" : "text-stone-400"}`}>
+              <t.icon size={19} />
+              <span className="text-[9px]">{t.label}</span>
             </button>
           ))}
         </div>
@@ -696,7 +805,29 @@ function ShoppingTab({ members, items, stores, filter, setFilter,
   const [storeId, setStoreId] = useState("");
   const [manage, setManage] = useState(false);
   const [newStore, setNewStore] = useState("");
+  const [heard, setHeard] = useState("");
   const submit = () => { addItem(text, storeId); setText(""); };
+
+  // Parse "milk from Costco" or "eggs, bread and bananas from Aldi".
+  const parseVoice = (transcript) => {
+    setHeard(transcript);
+    setTimeout(() => setHeard(""), 3000);
+    let body = transcript;
+    let matchedStore = null;
+    const fromMatch = transcript.match(/\s+from\s+(.+)$/i);
+    if (fromMatch) {
+      const spoken = fromMatch[1].trim().toLowerCase();
+      matchedStore = stores.find((s) => {
+        const n = s.name.toLowerCase();
+        return spoken.includes(n) || n.includes(spoken) || spoken.replace(/\s/g, "") === n.replace(/\s/g, "");
+      });
+      if (matchedStore) body = transcript.slice(0, fromMatch.index);
+    }
+    const parts = body.split(/,|\band\b/i).map((p) => p.trim()).filter(Boolean);
+    parts.forEach((p) => addItem(p, matchedStore ? matchedStore.id : (storeId || null)));
+  };
+  const { listening, start, supported } = useSpeech(parseVoice);
+
   const chip = (active) =>
     `text-[11px] px-2.5 py-1 rounded-full border whitespace-nowrap ${active ? "border-teal-500 bg-teal-50 text-teal-700" : "border-stone-200 text-stone-500 hover:border-stone-300"}`;
   const groups = [
@@ -723,14 +854,20 @@ function ShoppingTab({ members, items, stores, filter, setFilter,
           placeholder="Add item, like Milk 2L" maxLength={80}
           className="flex-1 min-w-0 h-10 px-3 text-sm border border-stone-200 rounded-xl outline-none focus:border-teal-500 bg-white text-stone-900" />
         <select value={storeId} onChange={(e) => setStoreId(e.target.value)}
-          className="w-28 h-10 px-2 text-xs border border-stone-200 rounded-xl outline-none focus:border-teal-500 bg-white text-stone-600">
+          className="w-24 h-10 px-2 text-xs border border-stone-200 rounded-xl outline-none focus:border-teal-500 bg-white text-stone-600">
           <option value="">No store</option>
           {stores.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
         </select>
+        {supported && <MicButton listening={listening} onClick={start} />}
         <button onClick={submit} aria-label="Add item" className="h-10 px-3 bg-teal-600 text-white text-sm rounded-xl hover:bg-teal-700">
           <Plus size={15} />
         </button>
       </div>
+      {(listening || heard) && (
+        <p className="text-[11px] text-teal-700 bg-teal-50 rounded-lg px-3 py-2">
+          {listening ? "Listening… try \"milk from Costco\"" : `Heard: "${heard}"`}
+        </p>
+      )}
       {items.length === 0 && (
         <p className="text-sm text-stone-400 text-center py-8">Nothing here yet. Add your first item above.</p>
       )}
@@ -962,12 +1099,16 @@ function RemindersTab({ members, me, reminders, isOverdue, addReminder, toggleRe
     const p = await Notification.requestPermission();
     setNotifState(p);
   };
+  const { listening, start, supported } = useSpeech((t) => setText((prev) => (prev ? prev + " " : "") + t));
   return (
     <div className="space-y-4">
       <div className="space-y-2">
-        <input value={text} onChange={(e) => setText(e.target.value)}
-          placeholder="Remind me to…" maxLength={100}
-          className="w-full h-10 px-3 text-sm border border-stone-200 rounded-xl outline-none focus:border-teal-500 bg-white text-stone-900" />
+        <div className="flex gap-2">
+          <input value={text} onChange={(e) => setText(e.target.value)}
+            placeholder="Remind me to…" maxLength={100}
+            className="flex-1 min-w-0 h-10 px-3 text-sm border border-stone-200 rounded-xl outline-none focus:border-teal-500 bg-white text-stone-900" />
+          {supported && <MicButton listening={listening} onClick={start} />}
+        </div>
         <div className="flex gap-2">
           <input type="datetime-local" value={due} onChange={(e) => setDue(e.target.value)}
             className="flex-1 min-w-0 h-10 px-3 text-sm border border-stone-200 rounded-xl outline-none focus:border-teal-500 bg-white text-stone-600" />
@@ -1106,6 +1247,171 @@ function EventsTab({ members, stores, events, addEvent, deleteEvent, editEvent, 
                   onDelete={() => deleteEvent(ev.id)} onEdit={() => openEdit(ev)} onOpenStore={() => openStore(ev.store_id)} />
               )
             ))}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+/* ---------- Expenses ---------- */
+const monthKey = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
+const monthLabel = (key) => {
+  const [y, m] = key.split("-").map(Number);
+  return new Date(y, m - 1, 1).toLocaleDateString(undefined, { month: "long", year: "numeric" });
+};
+const fmtMoney = (n) => `$${Number(n).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+
+function ExpensesTab({ members, expenses, cats, addExpense, editExpense, deleteExpense, addCategory, renameCategory, deleteCategory }) {
+  const [month, setMonth] = useState(monthKey(new Date()));
+  const [date, setDate] = useState(todayStr());
+  const [catId, setCatId] = useState("");
+  const [amount, setAmount] = useState("");
+  const [manage, setManage] = useState(false);
+  const [newCat, setNewCat] = useState("");
+  const [editingId, setEditingId] = useState(null);
+
+  const catById = (id) => cats.find((c) => c.id === id);
+  const submit = () => {
+    const cat = catById(catId) || cats[0];
+    if (!cat) return;
+    if (editingId) {
+      editExpense(editingId, { categoryId: cat.id, categoryName: cat.name, amount, date });
+      setEditingId(null);
+    } else {
+      addExpense({ categoryId: cat.id, categoryName: cat.name, amount, date });
+    }
+    setAmount("");
+  };
+  const startEdit = (ex) => {
+    setEditingId(ex.id);
+    setDate(ex.spent_on);
+    setCatId(ex.category_id || "");
+    setAmount(String(ex.amount));
+  };
+  const cancelEdit = () => { setEditingId(null); setAmount(""); setDate(todayStr()); };
+
+  const monthExpenses = expenses.filter((e) => e.spent_on.startsWith(month));
+  const total = monthExpenses.reduce((s, e) => s + Number(e.amount), 0);
+  const byDate = {};
+  monthExpenses.forEach((e) => { (byDate[e.spent_on] = byDate[e.spent_on] || []).push(e); });
+  const dates = Object.keys(byDate).sort((a, b) => (a < b ? 1 : -1));
+  const shiftMonth = (delta) => {
+    const [y, m] = month.split("-").map(Number);
+    setMonth(monthKey(new Date(y, m - 1 + delta, 1)));
+  };
+  const iconFor = (ex) => (catById(ex.category_id)?.icon) || "wallet";
+
+  return (
+    <div className="space-y-4">
+      <div className="flex items-center justify-between">
+        <h2 className="text-base font-medium text-stone-900">Expenses</h2>
+        <div className="flex items-center gap-2 text-xs text-stone-500">
+          <button onClick={() => shiftMonth(-1)} aria-label="Previous month" className="hover:text-stone-800">‹</button>
+          <span className="min-w-[92px] text-center">{monthLabel(month)}</span>
+          <button onClick={() => shiftMonth(1)} aria-label="Next month" className="hover:text-stone-800">›</button>
+        </div>
+      </div>
+
+      <div className="bg-teal-50 rounded-xl px-4 py-3 flex items-baseline justify-between">
+        <span className="text-xs text-teal-700">This month</span>
+        <span className="text-2xl font-medium text-teal-800">{fmtMoney(total)}</span>
+      </div>
+
+      <div className="space-y-2">
+        <div className="flex gap-2">
+          <input type="date" value={date} onChange={(e) => setDate(e.target.value)}
+            className="flex-1 min-w-0 h-10 px-3 text-sm border border-stone-200 rounded-xl outline-none focus:border-teal-500 bg-white text-stone-600" />
+          <select value={catId} onChange={(e) => setCatId(e.target.value)}
+            className="flex-1 min-w-0 h-10 px-2 text-sm border border-stone-200 rounded-xl outline-none focus:border-teal-500 bg-white text-stone-600">
+            {cats.length === 0 && <option value="">No categories</option>}
+            {cats.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+          </select>
+        </div>
+        <div className="flex gap-2">
+          <div className="flex-1 min-w-0 h-10 flex items-center border border-stone-200 rounded-xl bg-white focus-within:border-teal-500 px-3">
+            <span className="text-stone-400 text-sm mr-1">$</span>
+            <input type="number" inputMode="decimal" min="0" step="0.01" value={amount}
+              onChange={(e) => setAmount(e.target.value)} onKeyDown={(e) => e.key === "Enter" && submit()}
+              placeholder="Amount"
+              className="flex-1 min-w-0 h-full text-sm outline-none bg-transparent text-stone-900" />
+          </div>
+          <button onClick={submit} disabled={!amount || !(parseFloat(amount) > 0) || cats.length === 0}
+            className="h-10 px-4 bg-teal-600 text-white text-sm rounded-xl hover:bg-teal-700 disabled:opacity-40 flex items-center gap-1">
+            {editingId ? <><Check size={15} /> Save</> : <><Plus size={15} /> Add</>}
+          </button>
+          {editingId && (
+            <button onClick={cancelEdit} className="h-10 px-3 border border-stone-200 text-sm text-stone-600 rounded-xl hover:bg-stone-50">
+              <X size={15} />
+            </button>
+          )}
+        </div>
+        <button onClick={() => setManage(true)} className="text-[11px] text-teal-700">Edit categories</button>
+      </div>
+
+      {dates.length === 0 && (
+        <p className="text-sm text-stone-400 text-center py-8">No expenses this month. Add one above.</p>
+      )}
+      {dates.map((d) => (
+        <div key={d}>
+          <div className="flex items-center justify-between mb-1.5">
+            <p className="text-xs text-stone-400">{fmtDate(d)}</p>
+            <p className="text-xs text-stone-400">{fmtMoney(byDate[d].reduce((s, e) => s + Number(e.amount), 0))}</p>
+          </div>
+          <div className="border border-stone-200 rounded-xl divide-y divide-stone-100">
+            {byDate[d].map((ex) => (
+              <div key={ex.id} className="flex items-center gap-3 px-3 py-2.5">
+                <span className="w-8 h-8 rounded-lg bg-stone-100 flex items-center justify-center shrink-0">
+                  <CatIcon icon={iconFor(ex)} size={15} className="text-stone-600" />
+                </span>
+                <span className="flex-1 text-sm text-stone-800">{ex.category_name}</span>
+                <span className="text-sm font-medium text-stone-900">{fmtMoney(ex.amount)}</span>
+                <Avatar members={members} id={ex.added_by} size="w-6 h-6 text-[10px]" />
+                <button onClick={() => startEdit(ex)} aria-label="Edit expense" className="text-stone-300 hover:text-teal-700">
+                  <Pencil size={14} />
+                </button>
+                <button onClick={() => deleteExpense(ex.id)} aria-label="Delete expense" className="text-stone-300 hover:text-red-500">
+                  <Trash2 size={15} />
+                </button>
+              </div>
+            ))}
+          </div>
+        </div>
+      ))}
+
+      {manage && (
+        <div className="fixed inset-0 bg-black/30 flex items-end sm:items-center justify-center z-50" onClick={() => setManage(false)}>
+          <div className="w-full max-w-md bg-white rounded-t-3xl sm:rounded-3xl p-5" onClick={(e) => e.stopPropagation()}>
+            <div className="flex items-center justify-between mb-4">
+              <h2 className="text-base font-medium text-stone-900">Categories</h2>
+              <button onClick={() => setManage(false)} aria-label="Close" className="text-stone-400"><X size={18} /></button>
+            </div>
+            <div className="space-y-1 mb-4 max-h-64 overflow-y-auto">
+              {cats.map((c) => (
+                <div key={c.id} className="flex items-center gap-3 py-2 border-b border-stone-100">
+                  <span className="w-7 h-7 rounded-lg bg-stone-100 flex items-center justify-center shrink-0">
+                    <CatIcon icon={c.icon} size={14} className="text-stone-600" />
+                  </span>
+                  <span className="flex-1 text-sm text-stone-800">{c.name}</span>
+                  <button onClick={() => renameCategory(c.id, window.prompt("Rename category", c.name))}
+                    aria-label="Rename category" className="text-stone-300 hover:text-teal-700">
+                    <Pencil size={15} />
+                  </button>
+                  <button onClick={() => deleteCategory(c.id)} aria-label="Delete category" className="text-stone-300 hover:text-red-500">
+                    <Trash2 size={15} />
+                  </button>
+                </div>
+              ))}
+            </div>
+            <div className="flex gap-2">
+              <input value={newCat} onChange={(e) => setNewCat(e.target.value)}
+                onKeyDown={(e) => e.key === "Enter" && (addCategory(newCat, "wallet"), setNewCat(""))}
+                placeholder="Add category, like Childcare" maxLength={30}
+                className="flex-1 h-10 px-3 text-sm border border-stone-200 rounded-xl outline-none focus:border-teal-500 bg-white text-stone-900" />
+              <button onClick={() => { addCategory(newCat, "wallet"); setNewCat(""); }}
+                className="h-10 px-4 bg-teal-600 text-white text-sm rounded-xl hover:bg-teal-700">Add</button>
+            </div>
+            <p className="text-[11px] text-stone-400 mt-3">New categories use a default icon. Deleting one keeps past expenses' names intact.</p>
           </div>
         </div>
       )}
