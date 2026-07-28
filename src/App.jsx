@@ -3,7 +3,7 @@ import {
   ShoppingCart, Bell, Calendar, Home, Plus, Check, Trash2,
   Clock, MapPin, X, Users, Link2, Copy, LogOut, Lock, Pencil,
   Mic, Wallet, Fuel, Zap, UtensilsCrossed, Car, Heart, Home as HomeIcon,
-  Gift, Shirt, Plane, MoreHorizontal,
+  Gift, Shirt, Plane, MoreHorizontal, HelpCircle,
 } from "lucide-react";
 import { supabase } from "./supabase.js";
 
@@ -72,6 +72,97 @@ function MicButton({ listening, onClick }) {
       className={`h-10 px-3 rounded-xl border shrink-0 flex items-center justify-center ${listening ? "bg-teal-600 border-teal-600 text-white animate-pulse" : "bg-teal-50 border-teal-200 text-teal-700 hover:bg-teal-100"}`}>
       <Mic size={17} />
     </button>
+  );
+}
+
+const HELP = {
+  landing: {
+    title: "Welcome to Handy APP",
+    tips: [
+      ["users", "One shared space", "A household is your shared space — everyone in it sees the same shopping list, reminders, and events, updating live."],
+      ["plus", "Starting fresh?", "Tap New household, name it, and add your family. You'll get an invite link to share with them."],
+      ["link", "Someone invited you?", "Tap Join with code and paste the code (or open their invite link). You'll join their household."],
+      ["lock", "Save your invite link", "Once you're in, open the Family panel and copy your invite link. Keep it somewhere safe — it's how you get back in if your phone forgets."],
+    ],
+  },
+  home: {
+    title: "Using Home",
+    tips: [
+      ["home", "Your daily glance", "Everything that needs attention in one place — items to buy, reminders you can see, and upcoming events."],
+      ["check", "Tick things off here", "Tap the circle next to a shopping item to mark it bought, without leaving this page."],
+      ["users", "Who added what", "The coloured initial shows which family member added each thing."],
+    ],
+  },
+  shopping: {
+    title: "Using Shopping",
+    tips: [
+      ["cart", "Add an item", "Type it, pick a store, tap +. Or tap the mic and say \"milk from Costco\"."],
+      ["store", "Organise by store", "Tap Edit stores to add the shops you use. Tap a store chip to see only its items while you shop."],
+      ["check", "Tick as you go", "Check items off as they go in the trolley. Tap Clear done to tidy up after the trip."],
+    ],
+  },
+  reminders: {
+    title: "Using Reminders",
+    tips: [
+      ["bell", "Add a reminder", "Type it, set a date and time, tap Add. Overdue ones turn red and jump to the top."],
+      ["lock", "Choose who sees it", "Just me keeps it private. Tap a name to share with certain people, or Everyone for the whole household."],
+      ["clock", "A note on alerts", "Pop-ups only work while the app is open — it can't ring your phone when fully closed. Treat it as a shared list you check."],
+    ],
+  },
+  events: {
+    title: "Using Events",
+    tips: [
+      ["calendar", "Add an event", "Give it a title and date. Time, location, and notes are optional — the address shows right on the card."],
+      ["link", "Link a shopping run", "Planning a party? Link a store, and jump straight to that shopping list from the event."],
+      ["clock", "Past events fade", "Once they're done, events dim and drop to the bottom automatically."],
+    ],
+  },
+  expenses: {
+    title: "Using Expenses",
+    tips: [
+      ["wallet", "Log a spend", "Pick the date and category, type the amount, tap Add. The month's total shows at the top."],
+      ["calendar", "Browse by month", "Use the arrows by the month name to look back at previous months."],
+      ["store", "Your categories", "Tap Edit categories to add or rename them — like adding Childcare or Subscriptions."],
+    ],
+  },
+};
+const HELP_ICONS = {
+  users: Users, plus: Plus, link: Link2, lock: Lock, home: Home, check: Check,
+  cart: ShoppingCart, store: ShoppingCart, bell: Bell, clock: Clock, calendar: Calendar, wallet: Wallet,
+};
+
+function HelpSheet({ page, onClose }) {
+  const content = HELP[page];
+  if (!content) return null;
+  return (
+    <div className="fixed inset-0 bg-black/30 flex items-end sm:items-center justify-center z-[60]" onClick={onClose}>
+      <div className="w-full max-w-md bg-white rounded-t-3xl sm:rounded-3xl p-5" onClick={(e) => e.stopPropagation()}>
+        <div className="flex items-center justify-between mb-4">
+          <h2 className="text-base font-medium text-stone-900 flex items-center gap-2">
+            <span className="w-6 h-6 rounded-full bg-teal-50 text-teal-700 flex items-center justify-center text-sm">?</span>
+            {content.title}
+          </h2>
+          <button onClick={onClose} aria-label="Close" className="text-stone-400"><X size={18} /></button>
+        </div>
+        <div className="space-y-3.5">
+          {content.tips.map(([icon, head, body], i) => {
+            const Ico = HELP_ICONS[icon] || HelpCircle;
+            return (
+              <div key={i} className="flex gap-3">
+                <Ico size={17} className="text-teal-700 shrink-0 mt-0.5" />
+                <div>
+                  <p className="text-sm font-medium text-stone-800">{head}</p>
+                  <p className="text-xs text-stone-500 mt-0.5">{body}</p>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+        <button onClick={onClose} className="w-full h-10 mt-5 bg-teal-600 text-white text-sm rounded-xl hover:bg-teal-700">
+          Got it
+        </button>
+      </div>
+    </div>
   );
 }
 
@@ -179,6 +270,7 @@ export default function App() {
   const [tab, setTab] = useState("home");
   const [storeFilter, setStoreFilter] = useState("all");
   const [showMembers, setShowMembers] = useState(false);
+  const [helpPage, setHelpPage] = useState(null);
   const notified = useRef(new Set());
   const seededCats = useRef(false);
 
@@ -448,15 +540,21 @@ export default function App() {
               </p>
             </div>
           </div>
-          <button onClick={() => setShowMembers(true)} className="flex items-center" aria-label="Family members">
-            {members.slice(0, 4).map((m, i) => (
-              <div key={m.id} className={i > 0 ? "-ml-2" : ""} style={{ zIndex: 4 - i }}>
-                <div className="ring-2 ring-white rounded-full">
-                  <Avatar members={members} id={m.id} />
+          <div className="flex items-center gap-3">
+            <button onClick={() => setHelpPage(tab)} aria-label="How to use this page"
+              className="w-7 h-7 rounded-full border border-stone-300 text-stone-500 hover:border-teal-500 hover:text-teal-700 flex items-center justify-center text-sm shrink-0">
+              ?
+            </button>
+            <button onClick={() => setShowMembers(true)} className="flex items-center" aria-label="Family members">
+              {members.slice(0, 4).map((m, i) => (
+                <div key={m.id} className={i > 0 ? "-ml-2" : ""} style={{ zIndex: 4 - i }}>
+                  <div className="ring-2 ring-white rounded-full">
+                    <Avatar members={members} id={m.id} />
+                  </div>
                 </div>
-              </div>
-            ))}
-          </button>
+              ))}
+            </button>
+          </div>
         </div>
 
         {error && <p className="mx-5 mb-2 text-xs text-red-700 bg-red-50 rounded-lg p-2">{error}</p>}
@@ -518,6 +616,7 @@ export default function App() {
             }}
             onLeave={leaveHousehold} />
         )}
+        {helpPage && <HelpSheet page={helpPage} onClose={() => setHelpPage(null)} />}
       </div>
     </div>
   );
@@ -530,6 +629,15 @@ function JoinScreen({ onJoined }) {
   const [code, setCode] = useState("");
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState("");
+  const [showHelp, setShowHelp] = useState(false);
+
+  useEffect(() => {
+    const seen = store.get("handy_help_landing");
+    if (!seen) {
+      setShowHelp(true);
+      store.set("handy_help_landing", "1");
+    }
+  }, []);
 
   const create = async () => {
     if (!name.trim()) return;
@@ -594,7 +702,12 @@ function JoinScreen({ onJoined }) {
           </div>
         )}
         {err && <p className="text-xs text-red-700 bg-red-50 rounded-lg p-2 mt-3">{err}</p>}
+        <button onClick={() => setShowHelp(true)}
+          className="mt-4 text-xs text-teal-700 hover:underline flex items-center gap-1 mx-auto">
+          <HelpCircle size={13} /> How does this work?
+        </button>
       </div>
+      {showHelp && <HelpSheet page="landing" onClose={() => setShowHelp(false)} />}
     </div>
   );
 }
