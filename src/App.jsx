@@ -3,7 +3,7 @@ import {
   ShoppingCart, Bell, Calendar, Home, Plus, Check, Trash2,
   Clock, MapPin, X, Users, Link2, Copy, LogOut, Lock, Pencil,
   Mic, Wallet, Fuel, Zap, UtensilsCrossed, Car, Heart, Home as HomeIcon,
-  Gift, Shirt, Plane, MoreHorizontal, HelpCircle,
+  Gift, Shirt, Plane, MoreHorizontal, HelpCircle, Cake, Share2, ChevronRight,
 } from "lucide-react";
 import { supabase } from "./supabase.js";
 
@@ -114,6 +114,7 @@ const HELP = {
     tips: [
       ["calendar", "Add an event", "Give it a title and date. Time, location, and notes are optional — the address shows right on the card."],
       ["link", "Link a shopping run", "Planning a party? Link a store, and jump straight to that shopping list from the event."],
+      ["cake", "Birthdays too", "Switch to the Birthdays tab to add them — you'll get a home reminder the day before and a shareable card on the day."],
       ["clock", "Past events fade", "Once they're done, events dim and drop to the bottom automatically."],
     ],
   },
@@ -128,7 +129,7 @@ const HELP = {
 };
 const HELP_ICONS = {
   users: Users, plus: Plus, link: Link2, lock: Lock, home: Home, check: Check,
-  cart: ShoppingCart, store: ShoppingCart, bell: Bell, clock: Clock, calendar: Calendar, wallet: Wallet,
+  cart: ShoppingCart, store: ShoppingCart, bell: Bell, clock: Clock, calendar: Calendar, wallet: Wallet, cake: Cake,
 };
 
 function HelpSheet({ page, onClose }) {
@@ -221,6 +222,29 @@ const todayStr = () => {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
 };
 
+// Days until the next occurrence of a birthday (0 = today, 1 = tomorrow).
+const daysUntilBirthday = (dob) => {
+  const b = new Date(dob + "T00:00:00");
+  const now = new Date();
+  const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  let next = new Date(today.getFullYear(), b.getMonth(), b.getDate());
+  if (next < today) next = new Date(today.getFullYear() + 1, b.getMonth(), b.getDate());
+  return Math.round((next - today) / (24 * 60 * 60 * 1000));
+};
+const turningAge = (dob) => {
+  const b = new Date(dob + "T00:00:00");
+  const now = new Date();
+  let age = now.getFullYear() - b.getFullYear();
+  const hadThisYear = new Date(now.getFullYear(), b.getMonth(), b.getDate()) <= new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  // age they turn on their next birthday
+  return hadThisYear ? age + 1 : age;
+};
+const fmtBirthday = (dob) => {
+  const b = new Date(dob + "T00:00:00");
+  return b.toLocaleDateString(undefined, { month: "short", day: "numeric" });
+};
+const daysLabel = (n) => (n === 0 ? "today" : n === 1 ? "tomorrow" : `${n} days`);
+
 function Avatar({ members, id, size = "w-7 h-7 text-xs" }) {
   const i = members.findIndex((m) => m.id === id);
   const c = COLORS[(i < 0 ? 0 : i) % COLORS.length];
@@ -265,6 +289,7 @@ export default function App() {
   const [events, setEvents] = useState([]);
   const [expenses, setExpenses] = useState([]);
   const [expenseCats, setExpenseCats] = useState([]);
+  const [birthdays, setBirthdays] = useState([]);
   const [loading, setLoading] = useState(!!household);
   const [error, setError] = useState("");
   const [tab, setTab] = useState("home");
@@ -278,7 +303,7 @@ export default function App() {
     if (!household) return;
     const hid = household.id;
     try {
-      const [m, li, r, ev, st, ex, ec] = await Promise.all([
+      const [m, li, r, ev, st, ex, ec, bd] = await Promise.all([
         supabase.from("handy_members").select("*").eq("household_id", hid).order("created_at"),
         supabase.from("handy_list_items").select("*").eq("household_id", hid).order("created_at"),
         supabase.from("handy_reminders").select("*").eq("household_id", hid).order("due_at"),
@@ -286,8 +311,9 @@ export default function App() {
         supabase.from("handy_stores").select("*").eq("household_id", hid).order("created_at"),
         supabase.from("handy_expenses").select("*").eq("household_id", hid).order("spent_on", { ascending: false }),
         supabase.from("handy_expense_categories").select("*").eq("household_id", hid).order("created_at"),
+        supabase.from("handy_birthdays").select("*").eq("household_id", hid),
       ]);
-      const firstError = [m, li, r, ev, st, ex, ec].find((x) => x.error);
+      const firstError = [m, li, r, ev, st, ex, ec, bd].find((x) => x.error);
       if (firstError) throw firstError.error;
       setMembers(m.data);
       setItems(li.data);
@@ -296,6 +322,7 @@ export default function App() {
       setEvents(ev.data);
       setExpenses(ex.data);
       setExpenseCats(ec.data);
+      setBirthdays(bd.data);
       setError("");
       // Seed default expense categories once, for a household that has none yet.
       if (ec.data.length === 0 && !seededCats.current && m.data.length > 0) {
@@ -343,7 +370,7 @@ export default function App() {
   useEffect(() => {
     if (!household) return;
     const hid = household.id;
-    const tables = ["handy_members", "handy_list_items", "handy_reminders", "handy_events", "handy_stores", "handy_expenses", "handy_expense_categories"];
+    const tables = ["handy_members", "handy_list_items", "handy_reminders", "handy_events", "handy_stores", "handy_expenses", "handy_expense_categories", "handy_birthdays"];
     const channel = supabase.channel(`handy-${hid}`);
     tables.forEach((t) => {
       channel.on(
@@ -392,7 +419,7 @@ export default function App() {
     store.remove(ME_KEY);
     setHousehold(null);
     setMe(null);
-    setMembers([]); setItems([]); setStores([]); setReminders([]); setEvents([]); setExpenses([]); setExpenseCats([]);
+    setMembers([]); setItems([]); setStores([]); setReminders([]); setEvents([]); setExpenses([]); setExpenseCats([]); setBirthdays([]);
     setShowMembers(false);
   };
 
@@ -488,6 +515,15 @@ export default function App() {
     if (!window.confirm("Delete this category? Past expenses keep their category name.")) return;
     run(supabase.from("handy_expense_categories").delete().eq("id", id));
   };
+  const addBirthday = (name, dob) => {
+    if (!name.trim() || !dob) return;
+    run(supabase.from("handy_birthdays").insert({ household_id: household.id, name: name.trim(), dob, added_by: me }));
+  };
+  const editBirthday = (id, name, dob) => {
+    if (!name.trim() || !dob) return;
+    run(supabase.from("handy_birthdays").update({ name: name.trim(), dob }).eq("id", id));
+  };
+  const deleteBirthday = (id) => run(supabase.from("handy_birthdays").delete().eq("id", id));
 
   const now = new Date();
   const canSee = (r) => r.shared_with == null || r.added_by === me || (r.shared_with || []).includes(me);
@@ -501,6 +537,9 @@ export default function App() {
   );
   const upcoming = sortedEvents.filter((e) => e.event_date >= todayStr());
   const todayEventsCount = upcoming.filter((e) => e.event_date === todayStr()).length;
+  const sortedBirthdays = [...birthdays].sort((a, b) => daysUntilBirthday(a.dob) - daysUntilBirthday(b.dob));
+  const todayBirthdays = birthdays.filter((b) => daysUntilBirthday(b.dob) === 0);
+  const tomorrowBirthdays = birthdays.filter((b) => daysUntilBirthday(b.dob) === 1);
 
   if (!household) return <JoinScreen onJoined={saveHousehold} />;
 
@@ -564,6 +603,7 @@ export default function App() {
             <HomeTab members={members} stores={stores} toBuy={toBuy}
               dueTodayCount={dueTodayCount} overdueCount={overdueCount} todayEventsCount={todayEventsCount}
               visibleReminders={visibleReminders} isOverdue={isOverdue} upcoming={upcoming}
+              todayBirthdays={todayBirthdays} tomorrowBirthdays={tomorrowBirthdays}
               toggleReminder={toggleReminder} toggleItem={toggleItem}
               goTo={(t, sf) => { setTab(t); if (sf) setStoreFilter(sf); }} />
           )}
@@ -580,6 +620,7 @@ export default function App() {
           {tab === "events" && (
             <EventsTab members={members} stores={stores} events={sortedEvents}
               addEvent={addEvent} deleteEvent={deleteEvent} editEvent={editEvent}
+              birthdays={sortedBirthdays} addBirthday={addBirthday} editBirthday={editBirthday} deleteBirthday={deleteBirthday}
               openStore={(storeId) => { setTab("shopping"); setStoreFilter(storeId); }} />
           )}
           {tab === "expenses" && (
@@ -805,17 +846,161 @@ function MembersModal({ members, me, household, close, chooseMe, onAdd, onLeave 
 }
 
 /* ---------- Home ---------- */
+const CARD_TEMPLATES = [
+  { id: "sunset", bg: "linear-gradient(135deg,#7C3AED,#DB2777,#F59E0B)", emoji: "🎂", msg: "Wishing you a day as wonderful as you are. Have an amazing year ahead! 🎉" },
+  { id: "ocean", bg: "linear-gradient(135deg,#0EA5E9,#2563EB,#7C3AED)", emoji: "🎈", msg: "Happy Birthday! May this year bring you joy, health, and everything you wish for." },
+  { id: "confetti", bg: "linear-gradient(135deg,#F59E0B,#EF4444,#EC4899)", emoji: "🎉", msg: "Another trip around the sun! Hope your day is filled with cake and laughter. 🥳" },
+  { id: "calm", bg: "linear-gradient(135deg,#059669,#0D9488,#0891B2)", emoji: "🌿", msg: "Warmest birthday wishes. Wishing you peace, happiness, and a beautiful year." },
+];
+
+function BirthdayCardModal({ name, onClose }) {
+  const [tpl, setTpl] = useState(CARD_TEMPLATES[0]);
+  const [busy, setBusy] = useState(false);
+
+  const renderImage = () => new Promise((resolve) => {
+    const W = 800, H = 1000;
+    const canvas = document.createElement("canvas");
+    canvas.width = W; canvas.height = H;
+    const ctx = canvas.getContext("2d");
+    const colors = tpl.bg.match(/#[0-9A-Fa-f]{6}/g) || ["#7C3AED", "#DB2777"];
+    const g = ctx.createLinearGradient(0, 0, W, H);
+    colors.forEach((c, i) => g.addColorStop(i / (colors.length - 1), c));
+    ctx.fillStyle = g; ctx.fillRect(0, 0, W, H);
+    ctx.textAlign = "center";
+    ctx.font = "120px sans-serif";
+    ctx.fillText(tpl.emoji, W / 2, 320);
+    ctx.fillStyle = "rgba(255,255,255,0.92)";
+    ctx.font = "40px sans-serif";
+    ctx.fillText("Happy Birthday", W / 2, 420);
+    ctx.fillStyle = "#fff";
+    ctx.font = "bold 80px sans-serif";
+    ctx.fillText(name + "!", W / 2, 510);
+    ctx.fillStyle = "rgba(255,255,255,0.92)";
+    ctx.font = "34px sans-serif";
+    const words = tpl.msg.split(" ");
+    let line = "", y = 610;
+    words.forEach((w) => {
+      if ((line + w).length > 28) { ctx.fillText(line.trim(), W / 2, y); line = ""; y += 50; }
+      line += w + " ";
+    });
+    ctx.fillText(line.trim(), W / 2, y);
+    ctx.fillStyle = "rgba(255,255,255,0.7)";
+    ctx.font = "26px sans-serif";
+    ctx.fillText("from all of us · Handy APP", W / 2, H - 70);
+    canvas.toBlob((blob) => resolve(blob), "image/png");
+  });
+
+  const share = async () => {
+    setBusy(true);
+    const text = `Happy Birthday ${name}! 🎉`;
+    try {
+      const blob = await renderImage();
+      const file = new File([blob], `birthday-${name}.png`, { type: "image/png" });
+      if (navigator.canShare && navigator.canShare({ files: [file] })) {
+        await navigator.share({ files: [file], text });
+      } else if (navigator.share) {
+        await navigator.share({ text });
+      } else {
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement("a");
+        a.href = url; a.download = `birthday-${name}.png`; a.click();
+        URL.revokeObjectURL(url);
+      }
+    } catch (e) { /* cancelled/unsupported */ }
+    setBusy(false);
+  };
+
+  const shareWhatsApp = async () => {
+    const text = `Happy Birthday ${name}! 🎉 Wishing you an amazing year ahead!`;
+    try {
+      const blob = await renderImage();
+      const file = new File([blob], `birthday-${name}.png`, { type: "image/png" });
+      if (navigator.canShare && navigator.canShare({ files: [file] })) {
+        await navigator.share({ files: [file], text });
+        return;
+      }
+    } catch (e) { /* fall through */ }
+    window.open(`https://wa.me/?text=${encodeURIComponent(text)}`, "_blank");
+  };
+
+  return (
+    <div className="fixed inset-0 bg-black/40 flex items-end sm:items-center justify-center z-[60]" onClick={onClose}>
+      <div className="w-full max-w-md bg-white rounded-t-3xl sm:rounded-3xl p-5" onClick={(e) => e.stopPropagation()}>
+        <div className="flex items-center justify-between mb-3">
+          <h2 className="text-base font-medium text-stone-900">Birthday wish for {name}</h2>
+          <button onClick={onClose} aria-label="Close" className="text-stone-400"><X size={18} /></button>
+        </div>
+
+        <div className="rounded-2xl overflow-hidden mb-3">
+          <div style={{ background: tpl.bg }} className="px-5 py-8 text-center">
+            <div className="text-4xl mb-1">{tpl.emoji}</div>
+            <p className="text-sm text-white/90">Happy Birthday</p>
+            <p className="text-2xl font-semibold text-white mt-0.5 mb-2">{name}!</p>
+            <p className="text-xs text-white/90 max-w-[220px] mx-auto leading-relaxed">{tpl.msg}</p>
+            <p className="text-[10px] text-white/70 mt-3">from all of us · Handy APP</p>
+          </div>
+        </div>
+
+        <div className="flex gap-2 mb-4">
+          {CARD_TEMPLATES.map((t) => (
+            <button key={t.id} onClick={() => setTpl(t)} aria-label={`Template ${t.id}`}
+              className={`w-9 h-9 rounded-full shrink-0 border-2 ${tpl.id === t.id ? "border-stone-800" : "border-transparent"}`}
+              style={{ background: t.bg }} />
+          ))}
+        </div>
+
+        <div className="flex gap-2">
+          <button onClick={shareWhatsApp} disabled={busy}
+            className="flex-1 h-11 rounded-xl text-white text-sm flex items-center justify-center gap-2 disabled:opacity-50"
+            style={{ background: "#25D366" }}>
+            <Share2 size={16} /> WhatsApp
+          </button>
+          <button onClick={share} disabled={busy}
+            className="flex-1 h-11 rounded-xl border border-stone-200 text-stone-700 text-sm hover:bg-stone-50 flex items-center justify-center gap-2 disabled:opacity-50">
+            <Share2 size={15} /> Share / Save
+          </button>
+        </div>
+        <p className="text-[11px] text-stone-400 mt-3">Opens your phone's share sheet — you choose who to send it to. No phone numbers are stored in the app.</p>
+      </div>
+    </div>
+  );
+}
+
 function HomeTab({ members, stores, toBuy, dueTodayCount, overdueCount, todayEventsCount,
-  visibleReminders, isOverdue, upcoming, toggleReminder, toggleItem, goTo }) {
+  visibleReminders, isOverdue, upcoming, todayBirthdays, tomorrowBirthdays, toggleReminder, toggleItem, goTo }) {
   const homeReminders = visibleReminders.filter((r) => !r.done);
   const preview = toBuy;
+  const [wishFor, setWishFor] = useState(null);
   return (
     <div className="space-y-3.5">
+      {tomorrowBirthdays.map((b) => (
+        <div key={b.id} className="bg-stone-900 rounded-xl px-4 py-3 flex items-center gap-3">
+          <Cake size={20} className="text-amber-300 shrink-0" />
+          <div className="flex-1">
+            <p className="text-sm text-white font-medium">Tomorrow is {b.name}'s birthday</p>
+            <p className="text-[11px] text-stone-400 mt-0.5">Turning {turningAge(b.dob)}</p>
+          </div>
+        </div>
+      ))}
+      {todayBirthdays.map((b) => (
+        <div key={b.id} className="rounded-xl px-4 py-3 flex items-center gap-3"
+          style={{ background: "linear-gradient(120deg,#7C3AED,#DB2777)" }}>
+          <Gift size={20} className="text-white shrink-0" />
+          <p className="flex-1 text-sm text-white font-medium">🎉 It's {b.name}'s birthday!</p>
+          <button onClick={() => setWishFor(b)}
+            className="bg-white/25 hover:bg-white/35 rounded-lg px-3 py-1.5 text-[11px] text-white flex items-center gap-1">
+            <Share2 size={12} /> Wish
+          </button>
+        </div>
+      ))}
+
       <div className="bg-stone-50 rounded-lg px-3 py-2 flex flex-wrap gap-x-3 gap-y-0.5 text-[11px] text-stone-600">
         <span className="flex items-center gap-1"><ShoppingCart size={12} /> {toBuy.length} to buy</span>
         <span className="flex items-center gap-1"><Bell size={12} /> {dueTodayCount} due today{overdueCount > 0 ? ` · ${overdueCount} overdue` : ""}</span>
         <span className="flex items-center gap-1"><Calendar size={12} /> {todayEventsCount} event{todayEventsCount === 1 ? "" : "s"} today</span>
       </div>
+
+      {wishFor && <BirthdayCardModal name={wishFor.name} onClose={() => setWishFor(null)} />}
 
       <section>
         <div className="flex items-center justify-between mb-1.5">
@@ -1279,7 +1464,9 @@ function RemindersTab({ members, me, reminders, isOverdue, addReminder, toggleRe
 
 /* ---------- Events ---------- */
 const emptyEventForm = { title: "", date: "", time: "", location: "", notes: "", storeId: "" };
-function EventsTab({ members, stores, events, addEvent, deleteEvent, editEvent, openStore }) {
+function EventsTab({ members, stores, events, addEvent, deleteEvent, editEvent,
+  birthdays, addBirthday, editBirthday, deleteBirthday, openStore }) {
+  const [sub, setSub] = useState("events");
   const [showForm, setShowForm] = useState(false);
   const [editingId, setEditingId] = useState(null);
   const [form, setForm] = useState(emptyEventForm);
@@ -1335,6 +1522,22 @@ function EventsTab({ members, stores, events, addEvent, deleteEvent, editEvent, 
   );
   return (
     <div className="space-y-4">
+      <div className="flex gap-1 bg-stone-100 rounded-xl p-1">
+        <button onClick={() => setSub("events")}
+          className={`flex-1 h-9 text-sm rounded-lg ${sub === "events" ? "bg-white text-stone-900 border border-stone-200 font-medium" : "text-stone-500"}`}>
+          Events
+        </button>
+        <button onClick={() => setSub("birthdays")}
+          className={`flex-1 h-9 text-sm rounded-lg ${sub === "birthdays" ? "bg-white text-stone-900 border border-stone-200 font-medium" : "text-stone-500"}`}>
+          Birthdays
+        </button>
+      </div>
+
+      {sub === "birthdays" ? (
+        <BirthdaysView members={members} birthdays={birthdays}
+          addBirthday={addBirthday} editBirthday={editBirthday} deleteBirthday={deleteBirthday} />
+      ) : (
+      <div className="space-y-4">
       {showForm && !editingId ? EventForm : (
         <button onClick={openAdd}
           className="w-full h-10 border border-dashed border-stone-300 rounded-xl text-sm text-stone-500 hover:border-teal-500 hover:text-teal-700 flex items-center justify-center gap-1">
@@ -1362,6 +1565,87 @@ function EventsTab({ members, stores, events, addEvent, deleteEvent, editEvent, 
             ))}
           </div>
         </div>
+      )}
+      </div>
+      )}
+    </div>
+  );
+}
+
+function BirthdaysView({ members, birthdays, addBirthday, editBirthday, deleteBirthday }) {
+  const [name, setName] = useState("");
+  const [dob, setDob] = useState("");
+  const [showAll, setShowAll] = useState(false);
+  const [editingId, setEditingId] = useState(null);
+  const [eName, setEName] = useState("");
+  const [eDob, setEDob] = useState("");
+  const submit = () => { addBirthday(name, dob); setName(""); setDob(""); };
+  const startEdit = (b) => { setEditingId(b.id); setEName(b.name); setEDob(b.dob); };
+  const saveEdit = () => { editBirthday(editingId, eName, eDob); setEditingId(null); };
+  const shown = showAll ? birthdays : birthdays.slice(0, 5);
+  return (
+    <div className="space-y-4">
+      <div className="flex gap-2">
+        <input value={name} onChange={(e) => setName(e.target.value)}
+          onKeyDown={(e) => e.key === "Enter" && submit()}
+          placeholder="Name" maxLength={40}
+          className="flex-1 min-w-0 h-10 px-3 text-sm border border-stone-200 rounded-xl outline-none focus:border-teal-500 bg-white text-stone-900" />
+        <input type="date" value={dob} onChange={(e) => setDob(e.target.value)} aria-label="Date of birth"
+          className="w-36 h-10 px-2 text-sm border border-stone-200 rounded-xl outline-none focus:border-teal-500 bg-white text-stone-600" />
+        <button onClick={submit} disabled={!name.trim() || !dob} aria-label="Add birthday"
+          className="h-10 px-3 bg-teal-600 text-white text-sm rounded-xl hover:bg-teal-700 disabled:opacity-40">
+          <Plus size={15} />
+        </button>
+      </div>
+
+      {birthdays.length === 0 && (
+        <p className="text-sm text-stone-400 text-center py-8">No birthdays yet. Add one above.</p>
+      )}
+
+      {birthdays.length > 0 && (
+        <div className="border border-stone-200 rounded-xl divide-y divide-stone-100">
+          {shown.map((b, i) => {
+            if (editingId === b.id) {
+              return (
+                <div key={b.id} className="p-2 flex gap-2">
+                  <input value={eName} onChange={(e) => setEName(e.target.value)} maxLength={40}
+                    className="flex-1 min-w-0 h-9 px-2 text-sm border border-teal-400 rounded-lg outline-none bg-white text-stone-900" />
+                  <input type="date" value={eDob} onChange={(e) => setEDob(e.target.value)}
+                    className="w-32 h-9 px-2 text-sm border border-stone-200 rounded-lg outline-none focus:border-teal-500 bg-white text-stone-600" />
+                  <button onClick={saveEdit} aria-label="Save" className="text-teal-600 hover:text-teal-700"><Check size={17} /></button>
+                  <button onClick={() => setEditingId(null)} aria-label="Cancel" className="text-stone-400"><X size={17} /></button>
+                </div>
+              );
+            }
+            const days = daysUntilBirthday(b.dob);
+            const colorBg = ["bg-orange-100", "bg-violet-100", "bg-teal-100", "bg-pink-100", "bg-amber-100", "bg-sky-100"][i % 6];
+            const colorText = ["text-orange-700", "text-violet-700", "text-teal-700", "text-pink-700", "text-amber-700", "text-sky-700"][i % 6];
+            return (
+              <div key={b.id} className="flex items-center gap-3 px-3 py-2.5">
+                <span className={`w-8 h-8 rounded-lg ${colorBg} flex items-center justify-center shrink-0`}>
+                  <Cake size={15} className={colorText} />
+                </span>
+                <div className="flex-1 min-w-0">
+                  <p className="text-sm text-stone-800">{b.name}</p>
+                  <p className="text-[11px] text-stone-400">{fmtBirthday(b.dob)} · turning {turningAge(b.dob)}</p>
+                </div>
+                <span className={`text-[11px] ${days <= 1 ? "text-teal-700 font-medium" : "text-stone-400"}`}>{daysLabel(days)}</span>
+                <button onClick={() => startEdit(b)} aria-label="Edit birthday" className="text-stone-300 hover:text-teal-700">
+                  <Pencil size={14} />
+                </button>
+                <button onClick={() => deleteBirthday(b.id)} aria-label="Delete birthday" className="text-stone-300 hover:text-red-500">
+                  <Trash2 size={15} />
+                </button>
+              </div>
+            );
+          })}
+        </div>
+      )}
+
+      {birthdays.length > 5 && (
+        <button onClick={() => setShowAll(!showAll)} className="text-xs text-teal-700 flex items-center gap-1 mx-auto">
+          {showAll ? "Show less" : `More (${birthdays.length - 5})`} <ChevronRight size={13} />
+        </button>
       )}
     </div>
   );
