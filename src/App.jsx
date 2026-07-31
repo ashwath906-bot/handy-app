@@ -89,8 +89,17 @@ const HELP = {
     title: "Using Home",
     tips: [
       ["home", "Your daily glance", "Everything that needs attention in one place — items to buy, reminders you can see, and upcoming events."],
+      ["cake", "Birthday alerts", "The day before a birthday, a dark banner appears here. On the day itself it turns festive with a Wish button to send a card."],
       ["check", "Tick things off here", "Tap the circle next to a shopping item to mark it bought, without leaving this page."],
       ["users", "Who added what", "The coloured initial shows which family member added each thing."],
+    ],
+  },
+  birthdays: {
+    title: "Using Birthdays",
+    tips: [
+      ["cake", "Add a birthday", "Switch to the Birthdays tab, enter a name and date of birth, tap +. The list shows who's next and the age they're turning."],
+      ["home", "You'll be reminded", "The day before, Home shows a dark reminder banner. On the day, it turns festive with a Wish button."],
+      ["gift", "Send a wish", "Tap Wish to make a birthday card — pick a design, then share it by WhatsApp or your phone's share sheet. No phone numbers are stored."],
     ],
   },
   shopping: {
@@ -129,7 +138,7 @@ const HELP = {
 };
 const HELP_ICONS = {
   users: Users, plus: Plus, link: Link2, lock: Lock, home: Home, check: Check,
-  cart: ShoppingCart, store: ShoppingCart, bell: Bell, clock: Clock, calendar: Calendar, wallet: Wallet, cake: Cake,
+  cart: ShoppingCart, store: ShoppingCart, bell: Bell, clock: Clock, calendar: Calendar, wallet: Wallet, cake: Cake, gift: Gift,
 };
 
 function HelpSheet({ page, onClose }) {
@@ -296,6 +305,7 @@ export default function App() {
   const [storeFilter, setStoreFilter] = useState("all");
   const [showMembers, setShowMembers] = useState(false);
   const [helpPage, setHelpPage] = useState(null);
+  const [eventsSub, setEventsSub] = useState("events");
   const notified = useRef(new Set());
   const seededCats = useRef(false);
 
@@ -580,7 +590,7 @@ export default function App() {
             </div>
           </div>
           <div className="flex items-center gap-3">
-            <button onClick={() => setHelpPage(tab)} aria-label="How to use this page"
+            <button onClick={() => setHelpPage(tab === "events" && eventsSub === "birthdays" ? "birthdays" : tab)} aria-label="How to use this page"
               className="w-7 h-7 rounded-full border border-stone-300 text-stone-500 hover:border-teal-500 hover:text-teal-700 flex items-center justify-center text-sm shrink-0">
               ?
             </button>
@@ -619,6 +629,7 @@ export default function App() {
           )}
           {tab === "events" && (
             <EventsTab members={members} stores={stores} events={sortedEvents}
+              sub={eventsSub} setSub={setEventsSub}
               addEvent={addEvent} deleteEvent={deleteEvent} editEvent={editEvent}
               birthdays={sortedBirthdays} addBirthday={addBirthday} editBirthday={editBirthday} deleteBirthday={deleteBirthday}
               openStore={(storeId) => { setTab("shopping"); setStoreFilter(storeId); }} />
@@ -1465,8 +1476,7 @@ function RemindersTab({ members, me, reminders, isOverdue, addReminder, toggleRe
 /* ---------- Events ---------- */
 const emptyEventForm = { title: "", date: "", time: "", location: "", notes: "", storeId: "" };
 function EventsTab({ members, stores, events, addEvent, deleteEvent, editEvent,
-  birthdays, addBirthday, editBirthday, deleteBirthday, openStore }) {
-  const [sub, setSub] = useState("events");
+  birthdays, addBirthday, editBirthday, deleteBirthday, openStore, sub, setSub }) {
   const [showForm, setShowForm] = useState(false);
   const [editingId, setEditingId] = useState(null);
   const [form, setForm] = useState(emptyEventForm);
