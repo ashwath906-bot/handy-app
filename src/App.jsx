@@ -3,7 +3,7 @@ import {
   ShoppingCart, Bell, Calendar, Home, Plus, Check, Trash2,
   Clock, MapPin, X, Users, Link2, Copy, LogOut, Lock, Pencil,
   Mic, Wallet, Fuel, Zap, UtensilsCrossed, Car, Heart, Home as HomeIcon,
-  Gift, Shirt, Plane, MoreHorizontal, HelpCircle, Cake, Share2, ChevronRight,
+  Gift, Shirt, Plane, MoreHorizontal, HelpCircle, Cake, Share2, ChevronRight, RefreshCw,
 } from "lucide-react";
 import { supabase } from "./supabase.js";
 
@@ -858,50 +858,193 @@ function MembersModal({ members, me, household, close, chooseMe, onAdd, onLeave 
 
 /* ---------- Home ---------- */
 const CARD_TEMPLATES = [
-  { id: "sunset", bg: "linear-gradient(135deg,#7C3AED,#DB2777,#F59E0B)", emoji: "🎂", msg: "Wishing you a day as wonderful as you are. Have an amazing year ahead! 🎉" },
-  { id: "ocean", bg: "linear-gradient(135deg,#0EA5E9,#2563EB,#7C3AED)", emoji: "🎈", msg: "Happy Birthday! May this year bring you joy, health, and everything you wish for." },
-  { id: "confetti", bg: "linear-gradient(135deg,#F59E0B,#EF4444,#EC4899)", emoji: "🎉", msg: "Another trip around the sun! Hope your day is filled with cake and laughter. 🥳" },
-  { id: "calm", bg: "linear-gradient(135deg,#059669,#0D9488,#0891B2)", emoji: "🌿", msg: "Warmest birthday wishes. Wishing you peace, happiness, and a beautiful year." },
+  { id: "balloons", label: "Balloons", preview: "#FDF2F8",
+    wishes: ["Hope your day floats by beautifully!", "Wishing you a day full of joy and laughter.", "Up, up and away to a wonderful year!"] },
+  { id: "spotlight", label: "Spotlight", preview: "#312E81",
+    wishes: ["Make a wish — you deserve every one of them.", "Here's to another year of being amazing.", "Time to shine. Happy Birthday!"] },
+  { id: "confetti", label: "Confetti", preview: "linear-gradient(90deg,#F59E0B,#EC4899,#8B5CF6)",
+    wishes: ["Let the celebrations begin!", "Wishing you the best year yet.", "Pop the confetti — it's your day!"] },
+  { id: "bunting", label: "Bunting", preview: "#ECFEFF",
+    wishes: ["Let's celebrate you today!", "Cheers to you and the year ahead!", "Party mode: on. Enjoy every minute!"] },
+  { id: "elegant", label: "Elegant", preview: "#FAFAF9",
+    wishes: ["With warmest wishes on your special day.", "Wishing you health, happiness, and peace.", "May this year be as wonderful as you are."] },
+  { id: "gift", label: "Gift", preview: "linear-gradient(135deg,#FCE7F3,#EDE9FE)",
+    wishes: ["Hope your day is full of surprises!", "Unwrap a year full of happiness.", "The best gift is another year with you."] },
+  { id: "floral", label: "Floral", preview: "#FFF1F2",
+    wishes: ["Bloom and grow this year.", "Wishing you a day as lovely as you are.", "May your year blossom beautifully."] },
+  { id: "neon", label: "Neon", preview: "#0A0A0A",
+    wishes: ["Light up the year ahead!", "Shine bright — it's your night!", "Turn it up, it's your birthday!"] },
+  { id: "kids", label: "Kids", preview: "#DBEAFE",
+    wishes: ["Have the most awesome birthday ever!", "Hope it's filled with cake and fun!", "Happy Birthday, superstar!"] },
+  { id: "gold", label: "Gold frame", preview: "#1E3A5F",
+    wishes: ["Cheers to you on your special day.", "Raising a glass to your wonderful year.", "Wishing you a classy, happy year ahead."] },
 ];
 
+// Draws one card design onto a canvas context at the given width/height.
+function drawCard(ctx, W, H, id, name, wish) {
+  const cx = W / 2;
+  const roundText = (t, x, y, max, lh, font, color) => {
+    ctx.fillStyle = color; ctx.font = font; ctx.textAlign = "center";
+    const words = t.split(" "); let line = "", yy = y;
+    words.forEach((w) => {
+      if (ctx.measureText(line + w).width > max && line) { ctx.fillText(line.trim(), x, yy); line = ""; yy += lh; }
+      line += w + " ";
+    });
+    ctx.fillText(line.trim(), x, yy);
+    return yy;
+  };
+  const grad = (stops, x0, y0, x1, y1) => {
+    const g = ctx.createLinearGradient(x0, y0, x1, y1);
+    stops.forEach((c, i) => g.addColorStop(i / (stops.length - 1), c));
+    return g;
+  };
+  ctx.textAlign = "center";
+
+  if (id === "balloons") {
+    ctx.fillStyle = "#FDF2F8"; ctx.fillRect(0, 0, W, H);
+    const balloon = (x, y, r, col) => { ctx.fillStyle = col; ctx.beginPath(); ctx.ellipse(x, y, r, r * 1.25, 0, 0, 7); ctx.fill();
+      ctx.strokeStyle = "rgba(0,0,0,0.15)"; ctx.beginPath(); ctx.moveTo(x, y + r * 1.25); ctx.lineTo(x, y + r * 2.2); ctx.stroke(); };
+    balloon(W * 0.22, 150, 60, "#F472B6"); balloon(W * 0.42, 190, 50, "#A78BFA");
+    balloon(W * 0.72, 130, 64, "#60A5FA"); balloon(W * 0.85, 210, 44, "#FBBF24");
+    ctx.fillStyle = "#9D174D"; ctx.font = "38px sans-serif"; ctx.fillText("Happy Birthday", cx, H * 0.6);
+    ctx.fillStyle = "#831843"; ctx.font = "bold 84px sans-serif"; ctx.fillText(name + "!", cx, H * 0.6 + 90);
+    roundText(wish, cx, H * 0.6 + 160, W * 0.75, 44, "32px sans-serif", "#BE185D");
+  } else if (id === "spotlight") {
+    const g = ctx.createRadialGradient(cx, H * 0.4, 50, cx, H * 0.4, H * 0.7);
+    g.addColorStop(0, "#312E81"); g.addColorStop(1, "#0F172A");
+    ctx.fillStyle = g; ctx.fillRect(0, 0, W, H);
+    ctx.font = "20px sans-serif"; ctx.fillStyle = "#818CF8"; ctx.fillText("H A P P Y   B I R T H D A Y", cx, 90);
+    ctx.font = "150px sans-serif"; ctx.fillText("🎂", cx, H * 0.45);
+    ctx.fillStyle = "#fff"; ctx.font = "bold 72px sans-serif"; ctx.fillText(name, cx, H * 0.62);
+    roundText(wish, cx, H * 0.72, W * 0.75, 44, "30px sans-serif", "#A5B4FC");
+  } else if (id === "confetti") {
+    ctx.fillStyle = "#fff"; ctx.fillRect(0, 0, W, H);
+    ctx.fillStyle = grad(["#F59E0B", "#EC4899", "#8B5CF6"], 0, 0, W, 0); ctx.fillRect(0, 0, W, 180);
+    const bits = [["#fff", 0.2, 60], ["#FDE68A", 0.4, 110], ["#fff", 0.65, 50], ["#A7F3D0", 0.8, 130]];
+    bits.forEach(([c, fx, fy]) => { ctx.fillStyle = c; ctx.fillRect(W * fx, fy, 12, 12); });
+    ctx.fillStyle = "#9CA3AF"; ctx.font = "26px sans-serif"; ctx.fillText("HAPPY BIRTHDAY", cx, 300);
+    ctx.fillStyle = "#111827"; ctx.font = "bold 80px sans-serif"; ctx.fillText(name + "!", cx, 400);
+    roundText(wish, cx, 490, W * 0.75, 44, "32px sans-serif", "#6B7280");
+  } else if (id === "bunting") {
+    ctx.fillStyle = "#ECFEFF"; ctx.fillRect(0, 0, W, H);
+    const flags = ["#F87171", "#FBBF24", "#34D399", "#60A5FA", "#F472B6", "#A78BFA"];
+    flags.forEach((c, i) => { const x = 40 + i * 130; ctx.fillStyle = c; ctx.beginPath();
+      ctx.moveTo(x, 0); ctx.lineTo(x + 90, 0); ctx.lineTo(x + 45, 70); ctx.closePath(); ctx.fill(); });
+    ctx.font = "110px sans-serif"; ctx.fillText("🥳", cx, H * 0.42);
+    ctx.fillStyle = "#0E7490"; ctx.font = "34px sans-serif"; ctx.fillText("Happy Birthday", cx, H * 0.58);
+    ctx.fillStyle = "#164E63"; ctx.font = "bold 76px sans-serif"; ctx.fillText(name + "!", cx, H * 0.58 + 85);
+    roundText(wish, cx, H * 0.58 + 155, W * 0.75, 42, "30px sans-serif", "#0891B2");
+  } else if (id === "elegant") {
+    ctx.fillStyle = "#FAFAF9"; ctx.fillRect(0, 0, W, H);
+    ctx.fillStyle = "#A8A29E"; ctx.font = "26px sans-serif"; ctx.fillText("H A P P Y   B I R T H D A Y", cx, H * 0.36);
+    ctx.strokeStyle = "#D6D3D1"; ctx.lineWidth = 2;
+    ctx.beginPath(); ctx.moveTo(cx - 180, H * 0.42); ctx.lineTo(cx + 180, H * 0.42); ctx.stroke();
+    ctx.fillStyle = "#1C1917"; ctx.font = "80px Georgia, serif"; ctx.fillText(name, cx, H * 0.53);
+    ctx.beginPath(); ctx.moveTo(cx - 180, H * 0.58); ctx.lineTo(cx + 180, H * 0.58); ctx.stroke();
+    roundText(wish, cx, H * 0.66, W * 0.7, 42, "italic 30px Georgia, serif", "#78716C");
+  } else if (id === "gift") {
+    ctx.fillStyle = grad(["#FCE7F3", "#EDE9FE"], 0, 0, W, H); ctx.fillRect(0, 0, W, H);
+    const bx = cx - 90, by = 230;
+    ctx.fillStyle = "#8B5CF6"; ctx.fillRect(bx, by, 180, 150);
+    ctx.fillStyle = "#DDD6FE"; ctx.fillRect(cx - 18, by, 36, 150);
+    ctx.font = "70px sans-serif"; ctx.fillText("🎀", cx, by - 6);
+    ctx.fillStyle = "#7C3AED"; ctx.font = "34px sans-serif"; ctx.fillText("Happy Birthday", cx, by + 260);
+    ctx.fillStyle = "#5B21B6"; ctx.font = "bold 72px sans-serif"; ctx.fillText(name + "!", cx, by + 345);
+    roundText(wish, cx, by + 410, W * 0.75, 42, "30px sans-serif", "#7C3AED");
+  } else if (id === "floral") {
+    ctx.fillStyle = "#FFF1F2"; ctx.fillRect(0, 0, W, H);
+    ctx.font = "130px sans-serif"; ctx.textAlign = "left"; ctx.fillText("🌷", -10, 130);
+    ctx.textAlign = "right"; ctx.fillText("🌹", W + 10, H - 30); ctx.textAlign = "center";
+    ctx.fillStyle = "#9F1239"; ctx.font = "italic 34px Georgia, serif"; ctx.fillText("Happy Birthday", cx, H * 0.46);
+    ctx.fillStyle = "#881337"; ctx.font = "80px Georgia, serif"; ctx.fillText(name, cx, H * 0.56);
+    roundText(wish, cx, H * 0.64, W * 0.7, 42, "30px Georgia, serif", "#BE123C");
+  } else if (id === "neon") {
+    ctx.fillStyle = "#0A0A0A"; ctx.fillRect(0, 0, W, H);
+    ctx.shadowColor = "#E879F9"; ctx.shadowBlur = 24;
+    ctx.fillStyle = "#F0ABFC"; ctx.font = "40px sans-serif"; ctx.fillText("happy birthday", cx, H * 0.42);
+    ctx.shadowColor = "#22D3EE"; ctx.shadowBlur = 32;
+    ctx.fillStyle = "#67E8F9"; ctx.font = "bold 84px sans-serif"; ctx.fillText(name + "!", cx, H * 0.54);
+    ctx.shadowBlur = 0;
+    roundText(wish, cx, H * 0.66, W * 0.75, 44, "30px sans-serif", "#F5D0FE");
+  } else if (id === "kids") {
+    ctx.fillStyle = "#DBEAFE"; ctx.fillRect(0, 0, W, H);
+    ctx.font = "70px sans-serif"; ctx.fillText("🎈 🎂 🎁 🎈", cx, 150);
+    ctx.fillStyle = "#2563EB"; ctx.font = "bold 34px sans-serif"; ctx.fillText("HAPPY BIRTHDAY", cx, H * 0.5);
+    ctx.fillStyle = "#1D4ED8"; ctx.font = "bold 88px sans-serif"; ctx.fillText(name + "!", cx, H * 0.5 + 95);
+    roundText(wish, cx, H * 0.5 + 165, W * 0.8, 46, "32px sans-serif", "#2563EB");
+    ctx.font = "60px sans-serif"; ctx.fillText("⭐ 🎊 🌟 🎊 ⭐", cx, H - 60);
+  } else if (id === "gold") {
+    ctx.fillStyle = "#1E3A5F"; ctx.fillRect(0, 0, W, H);
+    ctx.strokeStyle = "#D4AF37"; ctx.lineWidth = 4;
+    ctx.strokeRect(80, 180, W - 160, H - 360);
+    ctx.font = "70px sans-serif"; ctx.fillText("🥂", cx, H * 0.4);
+    ctx.fillStyle = "#D4AF37"; ctx.font = "30px sans-serif"; ctx.fillText("H A P P Y   B I R T H D A Y", cx, H * 0.52);
+    ctx.fillStyle = "#fff"; ctx.font = "76px sans-serif"; ctx.fillText(name, cx, H * 0.62);
+    roundText(wish, cx, H * 0.7, W * 0.62, 42, "28px sans-serif", "#E5C97B");
+  }
+}
+
+// Live in-DOM preview of a template (simplified CSS version of the canvas art).
+function CardPreview({ tpl, name, wish }) {
+  const base = { position: "relative", minHeight: 200, display: "flex", flexDirection: "column",
+    alignItems: "center", justifyContent: "center", textAlign: "center", padding: "24px 16px", overflow: "hidden" };
+  const styles = {
+    balloons: { ...base, background: "#FDF2F8" },
+    spotlight: { ...base, background: "radial-gradient(circle at 50% 40%,#312E81,#0F172A)", color: "#fff" },
+    confetti: { ...base, background: "#fff", paddingTop: 60 },
+    bunting: { ...base, background: "#ECFEFF" },
+    elegant: { ...base, background: "#FAFAF9" },
+    gift: { ...base, background: "linear-gradient(135deg,#FCE7F3,#EDE9FE)" },
+    floral: { ...base, background: "#FFF1F2" },
+    neon: { ...base, background: "#0A0A0A" },
+    kids: { ...base, background: "#DBEAFE" },
+    gold: { ...base, background: "#1E3A5F" },
+  };
+  const nameColor = { balloons: "#831843", spotlight: "#fff", confetti: "#111827", bunting: "#164E63",
+    elegant: "#1C1917", gift: "#5B21B6", floral: "#881337", neon: "#67E8F9", kids: "#1D4ED8", gold: "#fff" };
+  const hbColor = { balloons: "#9D174D", spotlight: "#818CF8", confetti: "#9CA3AF", bunting: "#0E7490",
+    elegant: "#A8A29E", gift: "#7C3AED", floral: "#9F1239", neon: "#F0ABFC", kids: "#2563EB", gold: "#D4AF37" };
+  const wishColor = { balloons: "#BE185D", spotlight: "#A5B4FC", confetti: "#6B7280", bunting: "#0891B2",
+    elegant: "#78716C", gift: "#7C3AED", floral: "#BE123C", neon: "#F5D0FE", kids: "#2563EB", gold: "#E5C97B" };
+  const serif = ["elegant", "floral"].includes(tpl.id);
+  return (
+    <div style={styles[tpl.id]}>
+      {tpl.id === "balloons" && <div style={{ position: "absolute", top: 12, left: 0, right: 0, fontSize: 30 }}>🎈🎈🎈</div>}
+      {tpl.id === "spotlight" && <div style={{ fontSize: 46 }}>🎂</div>}
+      {tpl.id === "confetti" && <div style={{ position: "absolute", top: 0, left: 0, right: 0, height: 44, background: "linear-gradient(90deg,#F59E0B,#EC4899,#8B5CF6)" }} />}
+      {tpl.id === "bunting" && <div style={{ position: "absolute", top: 8, left: 0, right: 0, fontSize: 20, letterSpacing: 6 }}>🔺🔻🔺🔻🔺</div>}
+      {tpl.id === "gift" && <div style={{ fontSize: 40 }}>🎁</div>}
+      {tpl.id === "floral" && <><div style={{ position: "absolute", top: -6, left: -4, fontSize: 40 }}>🌷</div><div style={{ position: "absolute", bottom: -8, right: -2, fontSize: 40 }}>🌹</div></>}
+      {tpl.id === "kids" && <div style={{ position: "absolute", top: 10, left: 0, right: 0, fontSize: 22 }}>🎈🎂🎁🎈</div>}
+      {tpl.id === "gold" && <div style={{ fontSize: 30 }}>🥂</div>}
+      {tpl.id === "neon" && <div style={{ fontSize: 22, marginTop: 6 }}>🎉</div>}
+      <p style={{ fontSize: 12, color: hbColor[tpl.id], fontStyle: serif ? "italic" : "normal", fontFamily: serif ? "Georgia, serif" : "inherit", textShadow: tpl.id === "neon" ? "0 0 8px #E879F9" : "none" }}>Happy Birthday</p>
+      <p style={{ fontSize: 26, fontWeight: 700, margin: "2px 0 6px", color: nameColor[tpl.id], fontFamily: serif ? "Georgia, serif" : "inherit", textShadow: tpl.id === "neon" ? "0 0 12px #22D3EE" : "none" }}>{name}!</p>
+      <p style={{ fontSize: 11, color: wishColor[tpl.id], maxWidth: 220, lineHeight: 1.5, fontFamily: serif ? "Georgia, serif" : "inherit" }}>{wish}</p>
+      {tpl.id === "kids" && <div style={{ position: "absolute", bottom: 10, left: 0, right: 0, fontSize: 18 }}>⭐🎊🌟🎊⭐</div>}
+      {tpl.id === "gold" && <div style={{ position: "absolute", inset: 14, border: "2px solid #D4AF37", borderRadius: 8, pointerEvents: "none" }} />}
+    </div>
+  );
+}
+
 function BirthdayCardModal({ name, onClose }) {
-  const [tpl, setTpl] = useState(CARD_TEMPLATES[0]);
+  const [tplIdx, setTplIdx] = useState(0);
+  const [wishIdx, setWishIdx] = useState(0);
   const [busy, setBusy] = useState(false);
+  const tpl = CARD_TEMPLATES[tplIdx];
+  const wish = tpl.wishes[wishIdx % tpl.wishes.length];
+  const pickTpl = (i) => { setTplIdx(i); setWishIdx(0); };
 
   const renderImage = () => new Promise((resolve) => {
     const W = 800, H = 1000;
     const canvas = document.createElement("canvas");
     canvas.width = W; canvas.height = H;
     const ctx = canvas.getContext("2d");
-    const colors = tpl.bg.match(/#[0-9A-Fa-f]{6}/g) || ["#7C3AED", "#DB2777"];
-    const g = ctx.createLinearGradient(0, 0, W, H);
-    colors.forEach((c, i) => g.addColorStop(i / (colors.length - 1), c));
-    ctx.fillStyle = g; ctx.fillRect(0, 0, W, H);
-    ctx.textAlign = "center";
-    ctx.font = "120px sans-serif";
-    ctx.fillText(tpl.emoji, W / 2, 320);
-    ctx.fillStyle = "rgba(255,255,255,0.92)";
-    ctx.font = "40px sans-serif";
-    ctx.fillText("Happy Birthday", W / 2, 420);
-    ctx.fillStyle = "#fff";
-    ctx.font = "bold 80px sans-serif";
-    ctx.fillText(name + "!", W / 2, 510);
-    ctx.fillStyle = "rgba(255,255,255,0.92)";
-    ctx.font = "34px sans-serif";
-    const words = tpl.msg.split(" ");
-    let line = "", y = 610;
-    words.forEach((w) => {
-      if ((line + w).length > 28) { ctx.fillText(line.trim(), W / 2, y); line = ""; y += 50; }
-      line += w + " ";
-    });
-    ctx.fillText(line.trim(), W / 2, y);
-    ctx.fillStyle = "rgba(255,255,255,0.7)";
-    ctx.font = "26px sans-serif";
-    ctx.fillText("from all of us · Handy APP", W / 2, H - 70);
+    drawCard(ctx, W, H, tpl.id, name, wish);
     canvas.toBlob((blob) => resolve(blob), "image/png");
   });
 
-  const share = async () => {
+  const doShare = async (waFallback) => {
     setBusy(true);
     const text = `Happy Birthday ${name}! 🎉`;
     try {
@@ -909,6 +1052,8 @@ function BirthdayCardModal({ name, onClose }) {
       const file = new File([blob], `birthday-${name}.png`, { type: "image/png" });
       if (navigator.canShare && navigator.canShare({ files: [file] })) {
         await navigator.share({ files: [file], text });
+      } else if (waFallback) {
+        window.open(`https://wa.me/?text=${encodeURIComponent(`Happy Birthday ${name}! 🎉 ${wish}`)}`, "_blank");
       } else if (navigator.share) {
         await navigator.share({ text });
       } else {
@@ -921,52 +1066,38 @@ function BirthdayCardModal({ name, onClose }) {
     setBusy(false);
   };
 
-  const shareWhatsApp = async () => {
-    const text = `Happy Birthday ${name}! 🎉 Wishing you an amazing year ahead!`;
-    try {
-      const blob = await renderImage();
-      const file = new File([blob], `birthday-${name}.png`, { type: "image/png" });
-      if (navigator.canShare && navigator.canShare({ files: [file] })) {
-        await navigator.share({ files: [file], text });
-        return;
-      }
-    } catch (e) { /* fall through */ }
-    window.open(`https://wa.me/?text=${encodeURIComponent(text)}`, "_blank");
-  };
-
   return (
     <div className="fixed inset-0 bg-black/40 flex items-end sm:items-center justify-center z-[60]" onClick={onClose}>
-      <div className="w-full max-w-md bg-white rounded-t-3xl sm:rounded-3xl p-5" onClick={(e) => e.stopPropagation()}>
+      <div className="w-full max-w-md bg-white rounded-t-3xl sm:rounded-3xl p-5 max-h-[92vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
         <div className="flex items-center justify-between mb-3">
           <h2 className="text-base font-medium text-stone-900">Birthday wish for {name}</h2>
           <button onClick={onClose} aria-label="Close" className="text-stone-400"><X size={18} /></button>
         </div>
 
-        <div className="rounded-2xl overflow-hidden mb-3">
-          <div style={{ background: tpl.bg }} className="px-5 py-8 text-center">
-            <div className="text-4xl mb-1">{tpl.emoji}</div>
-            <p className="text-sm text-white/90">Happy Birthday</p>
-            <p className="text-2xl font-semibold text-white mt-0.5 mb-2">{name}!</p>
-            <p className="text-xs text-white/90 max-w-[220px] mx-auto leading-relaxed">{tpl.msg}</p>
-            <p className="text-[10px] text-white/70 mt-3">from all of us · Handy APP</p>
-          </div>
+        <div className="rounded-2xl overflow-hidden mb-2 border border-stone-100">
+          <CardPreview tpl={tpl} name={name} wish={wish} />
         </div>
 
-        <div className="flex gap-2 mb-4">
-          {CARD_TEMPLATES.map((t) => (
-            <button key={t.id} onClick={() => setTpl(t)} aria-label={`Template ${t.id}`}
-              className={`w-9 h-9 rounded-full shrink-0 border-2 ${tpl.id === t.id ? "border-stone-800" : "border-transparent"}`}
-              style={{ background: t.bg }} />
+        <button onClick={() => setWishIdx((i) => i + 1)}
+          className="w-full h-9 mb-3 border border-stone-200 rounded-lg text-xs text-stone-600 hover:bg-stone-50 flex items-center justify-center gap-1.5">
+          <RefreshCw size={13} /> Different wish
+        </button>
+
+        <div className="flex gap-2 overflow-x-auto pb-2 mb-4">
+          {CARD_TEMPLATES.map((t, i) => (
+            <button key={t.id} onClick={() => pickTpl(i)} aria-label={t.label}
+              className={`w-11 h-11 rounded-full shrink-0 border-2 ${tplIdx === i ? "border-stone-800" : "border-transparent"}`}
+              style={{ background: t.preview }} />
           ))}
         </div>
 
         <div className="flex gap-2">
-          <button onClick={shareWhatsApp} disabled={busy}
+          <button onClick={() => doShare(true)} disabled={busy}
             className="flex-1 h-11 rounded-xl text-white text-sm flex items-center justify-center gap-2 disabled:opacity-50"
             style={{ background: "#25D366" }}>
             <Share2 size={16} /> WhatsApp
           </button>
-          <button onClick={share} disabled={busy}
+          <button onClick={() => doShare(false)} disabled={busy}
             className="flex-1 h-11 rounded-xl border border-stone-200 text-stone-700 text-sm hover:bg-stone-50 flex items-center justify-center gap-2 disabled:opacity-50">
             <Share2 size={15} /> Share / Save
           </button>
