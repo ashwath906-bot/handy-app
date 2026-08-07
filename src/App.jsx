@@ -864,77 +864,79 @@ function MembersModal({ members, me, household, close, chooseMe, onAdd, onLeave 
 const CARD_TEMPLATES = [
   {
     id: "temp1", img: "/cards/temp1.png",
-    bg: "#FFF7ED", nameColor: "#EC4899",
+    nameColor: "#EC4899",
     font: "italic 700 __SIZE__px 'Brush Script MT', 'Segoe Script', cursive",
     cssFont: "'Brush Script MT', 'Segoe Script', cursive", cssItalic: true,
-    align: "center", prefix: "Dear ",
+    prefix: "Dear ",
     wishes: ["Wishing you a day full of joy and laughter!", "Have a wonderful year ahead!", "Hope your day is as bright as you are."],
   },
   {
     id: "temp2", img: "/cards/temp2.png",
-    bg: "#FDF2F8", nameColor: "#6B1E4E",
+    nameColor: "#6B1E4E",
     font: "700 __SIZE__px Georgia, 'Times New Roman', serif",
     cssFont: "Georgia, 'Times New Roman', serif", cssItalic: false,
-    align: "center", prefix: "For ",
+    prefix: "Dear ",
     wishes: ["Wishing you all the happiness today!", "May your day be as special as you are.", "Here's to a fantastic year ahead!"],
   },
   {
     id: "temp3", img: "/cards/temp3.png",
-    bg: "#EFF6FF", nameColor: "#DB2777",
+    nameColor: "#DB2777",
     font: "800 __SIZE__px 'Trebuchet MS', 'Segoe UI', sans-serif",
     cssFont: "'Trebuchet MS', 'Segoe UI', sans-serif", cssItalic: false,
-    align: "center", prefix: "For ",
+    prefix: "Dear ",
     wishes: ["Let's celebrate you today!", "Hope it's filled with cake and fun!", "Have the most awesome birthday ever!"],
   },
 ];
 
-// Draw a template + name onto a portrait canvas, returns via callback(blob, dataUrl).
+// Draw a template + name onto a white canvas sized tightly to the content.
 function renderCardCanvas(tpl, name, cb) {
-  const W = 800, H = 1000;
-  const canvas = document.createElement("canvas");
-  canvas.width = W; canvas.height = H;
-  const ctx = canvas.getContext("2d");
-  // background
-  ctx.fillStyle = tpl.bg; ctx.fillRect(0, 0, W, H);
-  // name at top
+  const W = 800;
   const label = (tpl.prefix || "") + name;
-  let size = 76;
-  ctx.textAlign = tpl.align === "left" ? "left" : "center";
-  const nx = tpl.align === "left" ? 70 : W / 2;
-  const setFont = (s) => { ctx.font = tpl.font.replace("__SIZE__", s); };
-  setFont(size);
-  while (ctx.measureText(label).width > W - 120 && size > 34) { size -= 4; setFont(size); }
-  ctx.fillStyle = tpl.nameColor;
-  ctx.fillText(label, nx, 150);
-  // artwork below, centered, scaled to fit width
   const img = new Image();
   img.crossOrigin = "anonymous";
-  img.onload = () => {
-    const maxW = W - 100, maxH = 640;
-    let dw = img.width, dh = img.height;
-    const scale = Math.min(maxW / dw, maxH / dh);
-    dw *= scale; dh *= scale;
-    const dx = (W - dw) / 2, dy = 230 + (maxH - dh) / 2;
-    ctx.drawImage(img, dx, dy, dw, dh);
+  const finish = (imgOk) => {
+    // measure name
+    const probe = document.createElement("canvas").getContext("2d");
+    let size = 76;
+    const setFont = (s) => { probe.font = tpl.font.replace("__SIZE__", s); };
+    setFont(size);
+    while (probe.measureText(label).width > W - 140 && size > 34) { size -= 4; setFont(size); }
+    const topPad = 44, gap = 20, bottomPad = 30;
+    const nameH = Math.round(size * 1.1);
+    let aw = 0, ah = 0, dx = 0;
+    if (imgOk) {
+      const maxW = W - 120;
+      const scale = Math.min(maxW / img.width, 1);
+      aw = Math.round(img.width * scale); ah = Math.round(img.height * scale);
+      dx = Math.round((W - aw) / 2);
+    }
+    const H = topPad + nameH + gap + ah + bottomPad;
+    const canvas = document.createElement("canvas");
+    canvas.width = W; canvas.height = H;
+    const ctx = canvas.getContext("2d");
+    ctx.fillStyle = "#ffffff"; ctx.fillRect(0, 0, W, H);
+    ctx.textAlign = "center"; ctx.textBaseline = "alphabetic";
+    ctx.font = tpl.font.replace("__SIZE__", size);
+    ctx.fillStyle = tpl.nameColor;
+    ctx.fillText(label, W / 2, topPad + size * 0.85);
+    if (imgOk) ctx.drawImage(img, dx, topPad + nameH + gap, aw, ah);
     canvas.toBlob((blob) => cb(blob, canvas.toDataURL("image/png")), "image/png");
   };
-  img.onerror = () => canvas.toBlob((blob) => cb(blob, canvas.toDataURL("image/png")), "image/png");
+  img.onload = () => finish(true);
+  img.onerror = () => finish(false);
   img.src = tpl.img;
 }
 
 function CardPreview({ tpl, name }) {
   const label = (tpl.prefix || "") + name;
   return (
-    <div style={{ background: tpl.bg }} className="w-full aspect-[4/5] flex flex-col items-center px-4 pt-6 pb-4">
+    <div className="w-full bg-white flex flex-col items-center px-4 pt-5 pb-4">
       <p style={{
         color: tpl.nameColor, fontFamily: tpl.cssFont, fontStyle: tpl.cssItalic ? "italic" : "normal",
-        fontWeight: 700, textAlign: tpl.align === "left" ? "left" : "center",
-        alignSelf: tpl.align === "left" ? "flex-start" : "center",
-        fontSize: "clamp(20px, 7vw, 34px)", lineHeight: 1.1, marginBottom: "8px",
+        fontWeight: 700, textAlign: "center",
+        fontSize: "clamp(22px, 8vw, 36px)", lineHeight: 1.1, marginBottom: "10px",
       }}>{label}</p>
-      <div className="flex-1 flex items-center justify-center min-h-0 w-full">
-        <img src={tpl.img} alt="Birthday card" className="max-h-full max-w-full object-contain" />
-      </div>
+      <img src={tpl.img} alt="Birthday card" className="max-w-full object-contain" style={{ maxHeight: "300px" }} />
     </div>
   );
 }
@@ -992,8 +994,7 @@ function BirthdayCardModal({ name, onClose }) {
         <div className="flex gap-2 overflow-x-auto pb-2 mb-4">
           {CARD_TEMPLATES.map((t, i) => (
             <button key={t.id} onClick={() => pickTpl(i)} aria-label={`Template ${i + 1}`}
-              className={`w-14 h-16 rounded-lg shrink-0 overflow-hidden border-2 ${tplIdx === i ? "border-stone-800" : "border-stone-200"}`}
-              style={{ background: t.bg }}>
+              className={`w-14 h-16 rounded-lg shrink-0 overflow-hidden bg-white border-2 ${tplIdx === i ? "border-stone-800" : "border-stone-200"}`}>
               <img src={t.img} alt="" className="w-full h-full object-contain p-1" />
             </button>
           ))}
